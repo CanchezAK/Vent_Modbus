@@ -1,19 +1,36 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
-  "idf.espIdfPath": "/home/canchezak/esp/v5.4.3/esp-idf",
+  "idf.espIdfPath": "/home/deck/esp/v5.4.3/esp-idf/",
   "idf.pythonInstallPath": "/usr/bin/python",
   "idf.openOcdConfigs": [
-    "board/esp32s3-builtin.cfg"
+    "board/esp32p4-builtin.cfg"
   ],
-  "idf.port": "detect",
-  "idf.toolsPath": "/home/canchezak/.espressif",
+  "idf.port": "/dev/ttyACM0",
+  "idf.toolsPath": "/home/deck/.espressif/",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
+    "IDF_TARGET": "esp32p4"
   },
-  "clangd.path": "/home/canchezak/.espressif/tools/esp-clang/esp-18.1.2_20240912/esp-clang/bin/clangd",
+  "clangd.path": "/home/deck/.espressif/tools/esp-clang/esp-18.1.2_20240912/esp-clang/bin/clangd",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=/home/canchezak/Documents/Projects/ESP32/Vent_Modbus/build"
-  ]
+    "--compile-commands-dir=/home/deck/Documents/Projects/ESP32/Vent_Modbus/build"
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "idf.py": true,
+    "set": true,
+    "pdftotext": true,
+    "printf": true,
+    "/^set -e\ncd /tmp\npython - <<'PY'\nimport re\npath = 'esp32-p4-nano-schematic\\.txt'\nkeys = \\['SDA', 'SCL', 'I2C', 'DSI', 'MIPI', 'LCD', 'TP', 'TOUCH', 'GT911'\\]\nwith open\\(path, 'r', errors='ignore'\\) as f:\n    lines = f\\.readlines\\(\\)\nfor i, line in enumerate\\(lines, 1\\):\n    if any\\(k in line for k in keys\\):\n        print\\(f\"\\{i\\}: \\{line\\.rstrip\\(\\)\\}\"\\)\nPY$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^set -e\ncd /tmp\npython - <<'PY'\nimport re\npath = 'esp32-p4-nano-schematic\\.pdf'\nkeys = \\[b'SDA', b'SCL', b'I2C', b'MIPI', b'DSI', b'LCD', b'GT911', b'GPIO', b'TP', b'TOUCH'\\]\nwith open\\(path, 'rb'\\) as f:\n    data = f\\.read\\(\\)\n# Extract ASCII strings\nstrings = re\\.findall\\(rb'\\[\\\\x20-\\\\x7E\\]\\{3,\\}', data\\)\nfound = \\[\\]\nfor s in strings:\n    for k in keys:\n        if k in s:\n            found\\.append\\(s\\)\n            break\n# De-duplicate while preserving order\nseen = set\\(\\)\nfor s in found:\n    if s in seen:\n        continue\n    seen\\.add\\(s\\)\n    print\\(s\\.decode\\('utf-8', errors='ignore'\\)\\)\nPY$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "command": true,
+    "cp": true
+  },
+  "idf.flashType": "UART"
 }
