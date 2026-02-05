@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdbool.h>
+#include <stdint.h>
 
-typedef void (*modbus_rtu_fan_control_cb_t)(bool cooler_one_on, bool cooler_two_on);
+typedef void (*modbus_rtu_fan_control_cb_t)(uint8_t cooler_one_percent, uint8_t cooler_two_percent);
 
 void Modbus_RTU_init(void);
 void Modbus_RTU_start_task(void);

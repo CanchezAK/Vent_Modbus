@@ -32,5 +32,6 @@
     "command": true,
     "cp": true
   },
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.currentSetup": "/home/deck/esp/v5.4.3/esp-idf/"
 }
