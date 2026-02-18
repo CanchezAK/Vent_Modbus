@@ -18,8 +18,8 @@ static i2c_master_dev_handle_t s_sht31_handle = NULL;
 static uint8_t s_sht31_addr = 0;
 static bool s_present = false;
 static bool s_valid = false;
-static uint16_t s_temp_centi = 0;
-static uint16_t s_humidity_centi = 0;
+static uint16_t s_temp_c = 0;
+static uint16_t s_humidity_percent = 0;
 static i2c_master_bus_handle_t s_i2c_bus = NULL;
 
 static uint8_t sht31_crc8(const uint8_t *data, size_t len)
@@ -44,7 +44,7 @@ static esp_err_t sht31_send_cmd(uint16_t cmd)
 	return i2c_master_transmit(s_sht31_handle, buf, sizeof(buf), -1);
 }
 
-static esp_err_t sht31_read_measurement(uint16_t *temp_centi, uint16_t *humidity_centi)
+static esp_err_t sht31_read_measurement(uint16_t *temp_c, uint16_t *humidity_percent)
 {
 	uint8_t data[SHT31_READ_LEN] = {0};
 	ESP_RETURN_ON_ERROR(sht31_send_cmd(SHT31_CMD_MEAS_HIGH), TAG,
@@ -61,20 +61,23 @@ static esp_err_t sht31_read_measurement(uint16_t *temp_centi, uint16_t *humidity
 	uint16_t raw_temp = (uint16_t)(data[0] << 8) | data[1];
 	uint16_t raw_hum = (uint16_t)(data[3] << 8) | data[4];
 
-	int32_t temp = -4500 + (17500 * (int32_t)raw_temp) / 65535;
-	uint32_t hum = (10000UL * raw_hum) / 65535;
+	int32_t temp_scaled = -4500 + (17500 * (int32_t)raw_temp) / 65535;
+	uint32_t hum_scaled = (10000UL * raw_hum) / 65535;
 
-	if (temp < 0) {
-		temp = 0;
-	} else if (temp > 65535) {
-		temp = 65535;
+	if (temp_scaled < 0) {
+		temp_scaled = 0;
+	} else if (temp_scaled > 65535) {
+		temp_scaled = 65535;
 	}
 
-	if (temp_centi) {
-		*temp_centi = (uint16_t)temp;
+	uint16_t temp_int = (uint16_t)((temp_scaled + 50) / 100);
+	uint16_t hum_int = (uint16_t)((hum_scaled + 50) / 100);
+
+	if (temp_c) {
+		*temp_c = temp_int;
 	}
-	if (humidity_centi) {
-		*humidity_centi = (uint16_t)hum;
+	if (humidity_percent) {
+		*humidity_percent = hum_int;
 	}
 
 	return ESP_OK;
@@ -83,21 +86,21 @@ static esp_err_t sht31_read_measurement(uint16_t *temp_centi, uint16_t *humidity
 static void sht31_task(void *arg)
 {
 	(void)arg;
-	uint16_t temp_centi = 0;
-	uint16_t humidity_centi = 0;
+	uint16_t temp_c = 0;
+	uint16_t humidity_percent = 0;
 	int32_t temp_filtered = -1;
 	int32_t hum_filtered = -1;
 
 	for (;;) {
 		bool ok = false;
 		if (s_sht31_handle &&
-			sht31_read_measurement(&temp_centi, &humidity_centi) == ESP_OK) {
+			sht31_read_measurement(&temp_c, &humidity_percent) == ESP_OK) {
 			if (temp_filtered < 0) {
-				temp_filtered = temp_centi;
-				hum_filtered = humidity_centi;
+				temp_filtered = temp_c;
+				hum_filtered = humidity_percent;
 			} else {
-				temp_filtered += (int32_t)(temp_centi - temp_filtered) / 5;
-				hum_filtered += (int32_t)(humidity_centi - hum_filtered) / 5;
+				temp_filtered += (int32_t)(temp_c - temp_filtered) / 5;
+				hum_filtered += (int32_t)(humidity_percent - hum_filtered) / 5;
 			}
 			if (temp_filtered < 0) {
 				temp_filtered = 0;
@@ -105,8 +108,8 @@ static void sht31_task(void *arg)
 			if (hum_filtered < 0) {
 				hum_filtered = 0;
 			}
-			s_temp_centi = (uint16_t)temp_filtered;
-			s_humidity_centi = (uint16_t)hum_filtered;
+			s_temp_c = (uint16_t)temp_filtered;
+			s_humidity_percent = (uint16_t)hum_filtered;
 			s_valid = true;
 			s_present = true;
 			ok = true;
@@ -160,13 +163,13 @@ bool SHT31_init(i2c_master_bus_handle_t i2c_bus)
 	return true;
 }
 
-bool SHT31_get_latest(uint16_t *temp_centi, uint16_t *humidity_centi, bool *valid)
+bool SHT31_get_latest(uint16_t *temp_c, uint16_t *humidity_percent, bool *valid)
 {
-	if (temp_centi) {
-		*temp_centi = s_temp_centi;
+	if (temp_c) {
+		*temp_c = s_temp_c;
 	}
-	if (humidity_centi) {
-		*humidity_centi = s_humidity_centi;
+	if (humidity_percent) {
+		*humidity_percent = s_humidity_percent;
 	}
 	if (valid) {
 		*valid = s_valid;

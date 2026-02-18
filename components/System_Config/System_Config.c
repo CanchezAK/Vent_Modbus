@@ -4,18 +4,27 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_err.h"
+#include "esp_timer.h"
+#include "sdkconfig.h"
 
-#define DEFAULT_TEMP_DESIRED_CENTI   (2500)
-#define DEFAULT_TEMP_THRESHOLD_CENTI (5000)
-#define DEFAULT_TEMP_ALARM_CENTI     (7000)
+#define DEFAULT_TEMP_DESIRED         (25)
+#define DEFAULT_TEMP_THRESHOLD       (50)
+#define DEFAULT_TEMP_ALARM           (70)
 
-#define DEFAULT_HUM_DESIRED_CENTI    (3000)
-#define DEFAULT_HUM_THRESHOLD_CENTI  (3500)
-#define DEFAULT_HUM_ALARM_CENTI      (3800)
+#define DEFAULT_HUM_DESIRED          (30)
+#define DEFAULT_HUM_THRESHOLD        (35)
+#define DEFAULT_HUM_ALARM            (38)
 
 #define DEFAULT_AC_HALF_CYCLE_US     (10000)
 #define DEFAULT_TRIAC_MIN_DELAY_US   (200)
 #define DEFAULT_TRIAC_PULSE_US       (100)
+
+#define DEFAULT_MODE                 (0)
+#define DEFAULT_FAN_MANUAL_PERCENT   (0)
+#define DEFAULT_FAN_MIN_PERCENT      (0)
+#define DEFAULT_SMOKE_ENABLE         (1)
+#define DEFAULT_SYSTEM_ENABLE        (1)
+#define DEFAULT_MODBUS_BAUD_INDEX    (3)
 
 static portMUX_TYPE s_cfg_lock = portMUX_INITIALIZER_UNLOCKED;
 static system_config_t s_cfg = {0};
@@ -26,24 +35,51 @@ static uint32_t s_ac_half_cycle_us = DEFAULT_AC_HALF_CYCLE_US;
 static uint32_t s_triac_min_delay_us = DEFAULT_TRIAC_MIN_DELAY_US;
 static uint32_t s_triac_pulse_us = DEFAULT_TRIAC_PULSE_US;
 static uint16_t s_alarm_clr = 0;
+static uint16_t s_service_hours_base = 0;
+static int64_t s_service_hours_base_us = 0;
+
+uint16_t System_Config_get_service_hours(void);
 
 #define NVS_NAMESPACE "system_config"
 #define NVS_KEY_CFG   "cfg"
 
 typedef struct {
-	uint16_t temp_desired_centi;
-	uint16_t temp_threshold_centi;
-	uint16_t temp_alarm_centi;
-	uint16_t humidity_desired_centi;
-	uint16_t humidity_threshold_centi;
-	uint16_t humidity_alarm_centi;
-	uint8_t fan1_percent;
-	uint8_t fan2_percent;
+	uint16_t mode;
+	uint16_t temp_desired;
+	uint16_t temp_threshold;
+	uint16_t temp_alarm;
+	uint16_t humidity_desired;
+	uint16_t humidity_threshold;
+	uint16_t humidity_alarm;
+	uint16_t fan_manual_percent;
+	uint16_t fan_min_percent;
+	uint16_t filter_limit_hours;
+	uint16_t system_enable;
+	uint16_t smoke_enable;
+	uint16_t modbus_addr;
+	uint16_t modbus_baud;
+	uint16_t service_hours;
 } persisted_config_t;
 
-static uint8_t clamp_percent(uint8_t value)
+static uint16_t clamp_percent(uint16_t value)
 {
 	return (value > 100) ? 100 : value;
+}
+
+static uint16_t sanitize_baud_index(uint16_t index)
+{
+	if (index > 3) {
+		return DEFAULT_MODBUS_BAUD_INDEX;
+	}
+	return index;
+}
+
+static uint16_t sanitize_addr(uint16_t addr)
+{
+	if (addr < 1 || addr > 247) {
+		return 1;
+	}
+	return addr;
 }
 
 static void sanitize(system_config_t *cfg)
@@ -51,20 +87,26 @@ static void sanitize(system_config_t *cfg)
 	if (!cfg) {
 		return;
 	}
-	cfg->fan1_percent = clamp_percent(cfg->fan1_percent);
-	cfg->fan2_percent = clamp_percent(cfg->fan2_percent);
+	cfg->fan_manual_percent = clamp_percent(cfg->fan_manual_percent);
+	cfg->fan_min_percent = clamp_percent(cfg->fan_min_percent);
+	cfg->filter_limit_hours = (cfg->filter_limit_hours > 10000) ? 10000 : cfg->filter_limit_hours;
+	cfg->mode = (cfg->mode > 2) ? 0 : cfg->mode;
+	cfg->system_enable = cfg->system_enable ? 1 : 0;
+	cfg->smoke_enable = cfg->smoke_enable ? 1 : 0;
+	cfg->modbus_addr = sanitize_addr(cfg->modbus_addr);
+	cfg->modbus_baud = sanitize_baud_index(cfg->modbus_baud);
 
-	if (cfg->temp_threshold_centi < cfg->temp_desired_centi) {
-		cfg->temp_threshold_centi = cfg->temp_desired_centi;
+	if (cfg->temp_threshold < cfg->temp_desired) {
+		cfg->temp_threshold = cfg->temp_desired;
 	}
-	if (cfg->temp_alarm_centi < cfg->temp_threshold_centi) {
-		cfg->temp_alarm_centi = cfg->temp_threshold_centi;
+	if (cfg->temp_alarm < cfg->temp_threshold) {
+		cfg->temp_alarm = cfg->temp_threshold;
 	}
-	if (cfg->humidity_threshold_centi < cfg->humidity_desired_centi) {
-		cfg->humidity_threshold_centi = cfg->humidity_desired_centi;
+	if (cfg->humidity_threshold < cfg->humidity_desired) {
+		cfg->humidity_threshold = cfg->humidity_desired;
 	}
-	if (cfg->humidity_alarm_centi < cfg->humidity_threshold_centi) {
-		cfg->humidity_alarm_centi = cfg->humidity_threshold_centi;
+	if (cfg->humidity_alarm < cfg->humidity_threshold) {
+		cfg->humidity_alarm = cfg->humidity_threshold;
 	}
 }
 
@@ -77,14 +119,21 @@ static void load_persisted(system_config_t *cfg)
 		return;
 	}
 	if (nvs_get_blob(handle, NVS_KEY_CFG, &stored, &size) == ESP_OK && size == sizeof(stored)) {
-		cfg->temp_desired_centi = stored.temp_desired_centi;
-		cfg->temp_threshold_centi = stored.temp_threshold_centi;
-		cfg->temp_alarm_centi = stored.temp_alarm_centi;
-		cfg->humidity_desired_centi = stored.humidity_desired_centi;
-		cfg->humidity_threshold_centi = stored.humidity_threshold_centi;
-		cfg->humidity_alarm_centi = stored.humidity_alarm_centi;
-		cfg->fan1_percent = stored.fan1_percent;
-		cfg->fan2_percent = stored.fan2_percent;
+		cfg->mode = stored.mode;
+		cfg->temp_desired = stored.temp_desired;
+		cfg->temp_threshold = stored.temp_threshold;
+		cfg->temp_alarm = stored.temp_alarm;
+		cfg->humidity_desired = stored.humidity_desired;
+		cfg->humidity_threshold = stored.humidity_threshold;
+		cfg->humidity_alarm = stored.humidity_alarm;
+		cfg->fan_manual_percent = stored.fan_manual_percent;
+		cfg->fan_min_percent = stored.fan_min_percent;
+		cfg->filter_limit_hours = stored.filter_limit_hours;
+		cfg->system_enable = stored.system_enable;
+		cfg->smoke_enable = stored.smoke_enable;
+		cfg->modbus_addr = stored.modbus_addr;
+		cfg->modbus_baud = stored.modbus_baud;
+		s_service_hours_base = stored.service_hours;
 	}
 	nvs_close(handle);
 }
@@ -96,14 +145,21 @@ static void save_persisted(const system_config_t *cfg)
 		return;
 	}
 	persisted_config_t stored = {
-		.temp_desired_centi = cfg->temp_desired_centi,
-		.temp_threshold_centi = cfg->temp_threshold_centi,
-		.temp_alarm_centi = cfg->temp_alarm_centi,
-		.humidity_desired_centi = cfg->humidity_desired_centi,
-		.humidity_threshold_centi = cfg->humidity_threshold_centi,
-		.humidity_alarm_centi = cfg->humidity_alarm_centi,
-		.fan1_percent = cfg->fan1_percent,
-		.fan2_percent = cfg->fan2_percent,
+		.mode = cfg->mode,
+		.temp_desired = cfg->temp_desired,
+		.temp_threshold = cfg->temp_threshold,
+		.temp_alarm = cfg->temp_alarm,
+		.humidity_desired = cfg->humidity_desired,
+		.humidity_threshold = cfg->humidity_threshold,
+		.humidity_alarm = cfg->humidity_alarm,
+		.fan_manual_percent = cfg->fan_manual_percent,
+		.fan_min_percent = cfg->fan_min_percent,
+		.filter_limit_hours = cfg->filter_limit_hours,
+		.system_enable = cfg->system_enable,
+		.smoke_enable = cfg->smoke_enable,
+		.modbus_addr = cfg->modbus_addr,
+		.modbus_baud = cfg->modbus_baud,
+		.service_hours = System_Config_get_service_hours(),
 	};
 	(void)nvs_set_blob(handle, NVS_KEY_CFG, &stored, sizeof(stored));
 	(void)nvs_commit(handle);
@@ -125,16 +181,20 @@ static void set_config(const system_config_t *cfg, system_config_source_t source
 void System_Config_init(void)
 {
 	system_config_t defaults = {
-		.temp_desired_centi = DEFAULT_TEMP_DESIRED_CENTI,
-		.temp_threshold_centi = DEFAULT_TEMP_THRESHOLD_CENTI,
-		.temp_alarm_centi = DEFAULT_TEMP_ALARM_CENTI,
-		.humidity_desired_centi = DEFAULT_HUM_DESIRED_CENTI,
-		.humidity_threshold_centi = DEFAULT_HUM_THRESHOLD_CENTI,
-		.humidity_alarm_centi = DEFAULT_HUM_ALARM_CENTI,
-		.fan1_mode_manual = 0,
-		.fan2_mode_manual = 0,
-		.fan1_percent = 0,
-		.fan2_percent = 0,
+		.temp_desired = DEFAULT_TEMP_DESIRED,
+		.temp_threshold = DEFAULT_TEMP_THRESHOLD,
+		.temp_alarm = DEFAULT_TEMP_ALARM,
+		.humidity_desired = DEFAULT_HUM_DESIRED,
+		.humidity_threshold = DEFAULT_HUM_THRESHOLD,
+		.humidity_alarm = DEFAULT_HUM_ALARM,
+		.mode = DEFAULT_MODE,
+		.fan_manual_percent = DEFAULT_FAN_MANUAL_PERCENT,
+		.fan_min_percent = DEFAULT_FAN_MIN_PERCENT,
+		.filter_limit_hours = 0,
+		.system_enable = DEFAULT_SYSTEM_ENABLE,
+		.smoke_enable = DEFAULT_SMOKE_ENABLE,
+		.modbus_addr = 1,
+		.modbus_baud = DEFAULT_MODBUS_BAUD_INDEX,
 	};
 	esp_err_t err = nvs_flash_init();
 	if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -142,6 +202,7 @@ void System_Config_init(void)
 		(void)nvs_flash_init();
 	}
 	load_persisted(&defaults);
+	s_service_hours_base_us = esp_timer_get_time();
 	s_alarm_clr = 0;
 	set_config(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL);
 }
@@ -199,6 +260,39 @@ void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value)
 	s_last_source = source;
 	s_version++;
 	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+uint16_t System_Config_get_service_hours(void)
+{
+	uint16_t base;
+	int64_t base_us;
+	portENTER_CRITICAL(&s_cfg_lock);
+	base = s_service_hours_base;
+	base_us = s_service_hours_base_us;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	int64_t now_us = esp_timer_get_time();
+	int64_t delta_us = now_us - base_us;
+	if (delta_us < 0) {
+		delta_us = 0;
+	}
+	uint32_t added = (uint32_t)(delta_us / (3600LL * 1000000LL));
+	uint32_t total = (uint32_t)base + added;
+	if (total > 10000) {
+		total = 10000;
+	}
+	return (uint16_t)total;
+}
+
+void System_Config_set_service_hours(uint16_t value)
+{
+	uint16_t clamped = (value > 10000) ? 10000 : value;
+	portENTER_CRITICAL(&s_cfg_lock);
+	s_service_hours_base = clamped;
+	s_service_hours_base_us = esp_timer_get_time();
+	s_last_source = SYSTEM_CONFIG_SOURCE_INTERNAL;
+	s_version++;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	save_persisted(&s_cfg);
 }
 
 void System_Config_get_phase_params(uint32_t *ac_half_cycle_us,

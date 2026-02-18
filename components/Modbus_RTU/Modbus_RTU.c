@@ -10,6 +10,8 @@
 #include "sdkconfig.h"
 #include "System_Config.h"
 #include "SHT31.h"
+#include "Peripherials.h"
+#include "Logic.h"
 
 #define MB_PORT_NUM     (CONFIG_MB_UART_PORT_NUM)
 #define MB_SLAVE_ADDR   (CONFIG_MB_SLAVE_ADDR)
@@ -21,38 +23,48 @@ static modbus_rtu_fan_control_cb_t s_fan_callback = NULL;
 #define MB_PAR_INFO_GET_TOUT (10)
 
 #define MB_HOLDING_RW_START  (0)
-#define MB_HOLDING_RW_COUNT  (11)
 #define MB_HOLDING_RO_START  (MB_HOLDING_RW_START + MB_HOLDING_RW_COUNT)
-#define MB_HOLDING_RO_COUNT  (6)
 
-typedef struct {
+
+#define MB_REG_COUNT(type) (sizeof(type) / sizeof(uint16_t))
+
+typedef struct __attribute__((packed)) {
+	uint16_t config_mode;
 	uint16_t config_temp_desired;
 	uint16_t config_temp_threshold;
 	uint16_t config_temp_alarm;
 	uint16_t config_humidity_desired;
 	uint16_t config_humidity_threshold;
 	uint16_t config_humidity_alarm;
-	uint16_t config_fan1_mode;
-	uint16_t config_fan2_mode;
-	uint16_t config_fan1_percent;
-	uint16_t config_fan2_percent;
+	uint16_t config_fan_manual_percent;
+	uint16_t config_fan_min_percent;
+	uint16_t config_filter_limit_hours;
+	uint16_t config_system_enable;
+	uint16_t config_smoke_enable;
+	uint16_t config_modbus_addr;
+	uint16_t config_modbus_baud;
+	uint16_t config_service_hours;
 	uint16_t config_alarm_clr;
 } holding_rw_params_t;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
 	uint16_t alarm_temp;
-	uint16_t alarm_cooler_one_failed;
-	uint16_t alarm_cooler_two_failed;
 	uint16_t alarm_humidity;
+	uint16_t alarm_smoke;
+	uint16_t alarm_fan;
+	uint16_t alarm_filter;
 	uint16_t current_temp;
 	uint16_t current_humidity;
+	uint16_t smoke_state;
 } holding_ro_params_t;
+
+#define MB_HOLDING_RW_COUNT  (MB_REG_COUNT(holding_rw_params_t))
+#define MB_HOLDING_RO_COUNT  (MB_REG_COUNT(holding_ro_params_t))
 
 static holding_rw_params_t holding_rw = {0};
 static holding_ro_params_t holding_ro = {0};
 
-static bool s_alarm_temp_latched = false;
-static bool s_alarm_humidity_latched = false;
+static logic_state_t s_logic_state;
 
 static uint8_t clamp_percent(uint16_t value)
 {
@@ -65,16 +77,21 @@ static void write_holding_from_config(const system_config_t *cfg, uint16_t alarm
 		return;
 	}
 	(void)mbc_slave_lock(mbc_slave_handle);
-	holding_rw.config_temp_desired = cfg->temp_desired_centi;
-	holding_rw.config_temp_threshold = cfg->temp_threshold_centi;
-	holding_rw.config_temp_alarm = cfg->temp_alarm_centi;
-	holding_rw.config_humidity_desired = cfg->humidity_desired_centi;
-	holding_rw.config_humidity_threshold = cfg->humidity_threshold_centi;
-	holding_rw.config_humidity_alarm = cfg->humidity_alarm_centi;
-	holding_rw.config_fan1_mode = cfg->fan1_mode_manual;
-	holding_rw.config_fan2_mode = cfg->fan2_mode_manual;
-	holding_rw.config_fan1_percent = cfg->fan1_percent;
-	holding_rw.config_fan2_percent = cfg->fan2_percent;
+	holding_rw.config_mode = cfg->mode;
+	holding_rw.config_temp_desired = cfg->temp_desired;
+	holding_rw.config_temp_threshold = cfg->temp_threshold;
+	holding_rw.config_temp_alarm = cfg->temp_alarm;
+	holding_rw.config_humidity_desired = cfg->humidity_desired;
+	holding_rw.config_humidity_threshold = cfg->humidity_threshold;
+	holding_rw.config_humidity_alarm = cfg->humidity_alarm;
+	holding_rw.config_fan_manual_percent = cfg->fan_manual_percent;
+	holding_rw.config_fan_min_percent = cfg->fan_min_percent;
+	holding_rw.config_filter_limit_hours = cfg->filter_limit_hours;
+	holding_rw.config_system_enable = cfg->system_enable;
+	holding_rw.config_smoke_enable = cfg->smoke_enable;
+	holding_rw.config_modbus_addr = cfg->modbus_addr;
+	holding_rw.config_modbus_baud = cfg->modbus_baud;
+	holding_rw.config_service_hours = System_Config_get_service_hours();
 	holding_rw.config_alarm_clr = alarm_clr;
 	(void)mbc_slave_unlock(mbc_slave_handle);
 }
@@ -82,61 +99,43 @@ static void write_holding_from_config(const system_config_t *cfg, uint16_t alarm
 static system_config_t build_config_from_holding(void)
 {
 	system_config_t cfg = {
-		.temp_desired_centi = holding_rw.config_temp_desired,
-		.temp_threshold_centi = holding_rw.config_temp_threshold,
-		.temp_alarm_centi = holding_rw.config_temp_alarm,
-			.humidity_desired_centi = holding_rw.config_humidity_desired,
-			.humidity_threshold_centi = holding_rw.config_humidity_threshold,
-			.humidity_alarm_centi = holding_rw.config_humidity_alarm,
-		.fan1_mode_manual = holding_rw.config_fan1_mode ? 1 : 0,
-		.fan2_mode_manual = holding_rw.config_fan2_mode ? 1 : 0,
-		.fan1_percent = clamp_percent(holding_rw.config_fan1_percent),
-		.fan2_percent = clamp_percent(holding_rw.config_fan2_percent),
+		.mode = holding_rw.config_mode,
+		.temp_desired = holding_rw.config_temp_desired,
+		.temp_threshold = holding_rw.config_temp_threshold,
+		.temp_alarm = holding_rw.config_temp_alarm,
+		.humidity_desired = holding_rw.config_humidity_desired,
+		.humidity_threshold = holding_rw.config_humidity_threshold,
+		.humidity_alarm = holding_rw.config_humidity_alarm,
+		.fan_manual_percent = clamp_percent(holding_rw.config_fan_manual_percent),
+		.fan_min_percent = clamp_percent(holding_rw.config_fan_min_percent),
+		.filter_limit_hours = holding_rw.config_filter_limit_hours,
+		.system_enable = holding_rw.config_system_enable ? 1 : 0,
+		.smoke_enable = holding_rw.config_smoke_enable ? 1 : 0,
+		.modbus_addr = holding_rw.config_modbus_addr,
+		.modbus_baud = holding_rw.config_modbus_baud,
 	};
 	return cfg;
 }
 
-static uint8_t compute_auto_percent(uint16_t current_temp,
-							 uint16_t desired_temp,
-							 uint16_t threshold_temp,
-							 uint16_t alarm_temp,
-							 uint8_t min_percent,
-							 bool *alarm_active)
+static uint32_t modbus_baud_from_index(uint16_t index)
 {
-	if (alarm_active) {
-		*alarm_active = (current_temp >= alarm_temp);
+	switch (index) {
+	case 0:
+		return 4800;
+	case 1:
+		return 9600;
+	case 2:
+		return 57600;
+	case 3:
+		return 115200;
+	default:
+		return 115200;
 	}
-
-	if (current_temp >= alarm_temp) {
-		return 100;
-	}
-
-	if (current_temp >= threshold_temp) {
-		return 100;
-	}
-
-	if (current_temp <= desired_temp) {
-		return min_percent;
-	}
-
-	if (threshold_temp <= desired_temp) {
-		return 100;
-	}
-
-	uint32_t delta = (uint32_t)(current_temp - desired_temp);
-	uint32_t span = (uint32_t)(threshold_temp - desired_temp);
-	uint32_t scale = (uint32_t)(100 - min_percent);
-	uint32_t value = min_percent + (delta * scale) / span;
-	if (value > 100) {
-		value = 100;
-	}
-	return (uint8_t)value;
 }
 
 static void modbus_task(void *arg)
 {
-	uint8_t cooler_one_percent = 0;
-	uint8_t cooler_two_percent = 0;
+	logic_output_t logic_out = {0};
 
 	mb_param_info_t reg_info = {0};
 
@@ -148,13 +147,11 @@ static void modbus_task(void *arg)
 				System_Config_set_alarm_clr(SYSTEM_CONFIG_SOURCE_MODBUS, holding_rw.config_alarm_clr);
 				alarm_clr = System_Config_get_alarm_clr();
 			}
+			if (holding_rw.config_service_hours != System_Config_get_service_hours()) {
+				System_Config_set_service_hours(holding_rw.config_service_hours);
+			}
 			system_config_t updated = build_config_from_holding();
 			System_Config_set_from_modbus(&updated);
-		}
-
-		if (alarm_clr == 0) {
-			s_alarm_temp_latched = false;
-			s_alarm_humidity_latched = false;
 		}
 
 		system_config_source_t source = SYSTEM_CONFIG_SOURCE_INTERNAL;
@@ -164,74 +161,42 @@ static void modbus_task(void *arg)
 		uint16_t current_temp = 0;
 		uint16_t current_humidity = 0;
 		if (!SHT31_get_latest(&current_temp, &current_humidity, NULL)) {
-			current_temp = 25500;
-			current_humidity = 10000;
+			current_temp = 255;
+			current_humidity = 100;
 		}
 
-		uint16_t desired_temp = cfg.temp_desired_centi;
-		uint16_t threshold_temp = cfg.temp_threshold_centi;
-		uint16_t alarm_temp = cfg.temp_alarm_centi;
-		uint16_t desired_hum = cfg.humidity_desired_centi;
-		uint16_t threshold_hum = cfg.humidity_threshold_centi;
-		uint16_t alarm_hum = cfg.humidity_alarm_centi;
 
-		uint8_t fan1_mode = cfg.fan1_mode_manual ? 1 : 0;
-		uint8_t fan2_mode = cfg.fan2_mode_manual ? 1 : 0;
-		uint8_t fan1_user_percent = clamp_percent(cfg.fan1_percent);
-		uint8_t fan2_user_percent = clamp_percent(cfg.fan2_percent);
 
-		uint8_t fan1_min_percent = (fan1_user_percent == 0) ? 0 : fan1_user_percent;
-		uint8_t fan2_min_percent = (fan2_user_percent == 0) ? 0 : fan2_user_percent;
-
-		uint8_t temp_percent = compute_auto_percent(current_temp, desired_temp,
-										 threshold_temp, alarm_temp,
-										 fan1_min_percent, NULL);
-		uint8_t hum_percent = compute_auto_percent(current_humidity, desired_hum,
-										 threshold_hum, alarm_hum,
-										 fan1_min_percent, NULL);
-		uint8_t auto_percent = (temp_percent > hum_percent) ? temp_percent : hum_percent;
-		cooler_one_percent = (fan1_mode && fan1_user_percent != 0) ?
-				fan1_user_percent : auto_percent;
-
-		temp_percent = compute_auto_percent(current_temp, desired_temp,
-										 threshold_temp, alarm_temp,
-										 fan2_min_percent, NULL);
-		hum_percent = compute_auto_percent(current_humidity, desired_hum,
-										 threshold_hum, alarm_hum,
-										 fan2_min_percent, NULL);
-		auto_percent = (temp_percent > hum_percent) ? temp_percent : hum_percent;
-		cooler_two_percent = (fan2_mode && fan2_user_percent != 0) ?
-				fan2_user_percent : auto_percent;
-
-		if (current_temp >= alarm_temp) {
-			s_alarm_temp_latched = true;
-		}
-		if (current_humidity >= alarm_hum) {
-			s_alarm_humidity_latched = true;
-		}
-
-		if (s_alarm_temp_latched || s_alarm_humidity_latched) {
+		uint16_t service_hours = System_Config_get_service_hours();
+		bool filter_alarm = (cfg.filter_limit_hours > 0) && (service_hours >= cfg.filter_limit_hours);
+		logic_input_t logic_in = {
+			.current_temp = current_temp,
+			.current_humidity = current_humidity,
+			.door_open = Peripherials_get_door_state(),
+			.smoke_state = Peripherials_get_smoke_state(),
+			.fan_alarm = Peripherials_get_fan_alarm_state(),
+			.filter_alarm = filter_alarm,
+		};
+		Logic_step(&s_logic_state, &cfg, alarm_clr, &logic_in, &logic_out);
+		if (logic_out.alarm_temp || logic_out.alarm_humidity || logic_out.alarm_smoke) {
 			System_Config_set_alarm_clr(SYSTEM_CONFIG_SOURCE_INTERNAL, 1);
 			alarm_clr = System_Config_get_alarm_clr();
 			write_holding_from_config(&cfg, alarm_clr);
 		}
 
-		if (s_alarm_temp_latched || s_alarm_humidity_latched) {
-			cooler_one_percent = 100;
-			cooler_two_percent = 100;
-		}
-
 		(void)mbc_slave_lock(mbc_slave_handle);
-		holding_ro.alarm_temp = s_alarm_temp_latched ? 1 : 0;
-		holding_ro.alarm_cooler_one_failed = 0;
-		holding_ro.alarm_cooler_two_failed = 0;
-		holding_ro.alarm_humidity = s_alarm_humidity_latched ? 1 : 0;
+		holding_ro.alarm_temp = logic_out.alarm_temp ? 1 : 0;
+		holding_ro.alarm_humidity = logic_out.alarm_humidity ? 1 : 0;
+		holding_ro.alarm_smoke = logic_out.alarm_smoke ? 1 : 0;
+		holding_ro.alarm_fan = logic_out.alarm_fan ? 1 : 0;
+		holding_ro.alarm_filter = logic_out.alarm_filter ? 1 : 0;
 		holding_ro.current_temp = current_temp;
 		holding_ro.current_humidity = current_humidity;
+		holding_ro.smoke_state = logic_in.smoke_state ? 1 : 0;
 		(void)mbc_slave_unlock(mbc_slave_handle);
 
 		if (s_fan_callback) {
-			s_fan_callback(cooler_one_percent, cooler_two_percent);
+			s_fan_callback(logic_out.fan_percent);
 		}
 
 		vTaskDelay(pdMS_TO_TICKS(250));
@@ -241,6 +206,10 @@ static void modbus_task(void *arg)
 void Modbus_RTU_init(void)
 {
 	mb_register_area_descriptor_t reg_area = {0};
+	system_config_t cfg = System_Config_get_snapshot(NULL, NULL);
+	uint16_t modbus_addr = cfg.modbus_addr ? cfg.modbus_addr : MB_SLAVE_ADDR;
+	uint32_t modbus_baud = modbus_baud_from_index(cfg.modbus_baud);
+	Logic_init(&s_logic_state);
 
 	mb_communication_info_t comm_config = {
 		.ser_opts.port = MB_PORT_NUM,
@@ -249,9 +218,9 @@ void Modbus_RTU_init(void)
 #elif CONFIG_MB_COMM_MODE_RTU
 		.ser_opts.mode = MB_RTU,
 #endif
-		.ser_opts.baudrate = MB_DEV_SPEED,
+		.ser_opts.baudrate = modbus_baud,
 		.ser_opts.parity = MB_PARITY_NONE,
-		.ser_opts.uid = MB_SLAVE_ADDR,
+		.ser_opts.uid = modbus_addr,
 		.ser_opts.data_bits = UART_DATA_8_BITS,
 		.ser_opts.stop_bits = UART_STOP_BITS_1
 	};
@@ -279,18 +248,6 @@ void Modbus_RTU_init(void)
 	ESP_ERROR_CHECK(uart_set_mode(MB_PORT_NUM, UART_MODE_RS485_HALF_DUPLEX));
 
 	ESP_ERROR_CHECK(mbc_slave_start(mbc_slave_handle));
-
-	// if (!SHT31_is_present()) {
-	// 	(void)mbc_slave_lock(mbc_slave_handle);
-	// 	holding_ro.current_temp = 25500;
-	// 	holding_ro.current_humidity = 10000;
-	// 	holding_ro.alarm_temp = 1;
-	// 	holding_ro.alarm_humidity = 1;
-	// 	s_alarm_temp_latched = true;
-	// 	s_alarm_humidity_latched = true;
-	// 	holding_rw.config_alarm_clr = 1;
-	// 	(void)mbc_slave_unlock(mbc_slave_handle);
-	// }
 }
 
 void Modbus_RTU_start_task(void)

@@ -14,16 +14,20 @@ typedef enum {
 } system_config_source_t;
 
 typedef struct {
-	uint16_t temp_desired_centi;
-	uint16_t temp_threshold_centi;
-	uint16_t temp_alarm_centi;
-	uint16_t humidity_desired_centi;
-	uint16_t humidity_threshold_centi;
-	uint16_t humidity_alarm_centi;
-	uint8_t fan1_mode_manual;
-	uint8_t fan2_mode_manual;
-	uint8_t fan1_percent;
-	uint8_t fan2_percent;
+	uint16_t mode;
+	uint16_t temp_desired;
+	uint16_t temp_threshold;
+	uint16_t temp_alarm;
+	uint16_t humidity_desired;
+	uint16_t humidity_threshold;
+	uint16_t humidity_alarm;
+	uint16_t fan_manual_percent;
+	uint16_t fan_min_percent;
+	uint16_t filter_limit_hours;
+	uint16_t system_enable;
+	uint16_t smoke_enable;
+	uint16_t modbus_addr;
+	uint16_t modbus_baud;
 } system_config_t;
 
 void System_Config_init(void);
@@ -35,6 +39,9 @@ system_config_t System_Config_get_snapshot(system_config_source_t *source, uint3
 
 uint16_t System_Config_get_alarm_clr(void);
 void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value);
+
+uint16_t System_Config_get_service_hours(void);
+void System_Config_set_service_hours(uint16_t value);
 
 void System_Config_get_phase_params(uint32_t *ac_half_cycle_us,
 									 uint32_t *triac_min_delay_us,
