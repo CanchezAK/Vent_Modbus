@@ -10,13 +10,19 @@ extern "C" {
 
 // enum declarations
 
+
+
 // Flow global variables
 
 enum FlowGlobalVariables {
-    FLOW_GLOBAL_VARIABLE_NONE
+    FLOW_GLOBAL_VARIABLE_FAN_PERCENTAGE = 0
 };
 
 // Native global variables
+
+extern int32_t get_var_fan_percentage();
+extern void set_var_fan_percentage(int32_t value);
+
 
 #ifdef __cplusplus
 }

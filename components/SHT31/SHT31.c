@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "SHT31.h"
 #include "esp_log.h"
+#include "esp_err.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,6 +11,8 @@
 #define SHT31_CMD_SOFT_RESET  (0x30A2)
 #define SHT31_CMD_MEAS_HIGH   (0x2400)
 #define SHT31_READ_LEN        (6)
+#define SHT31_MEAS_DELAY_MS   (20)
+#define SHT31_READ_RETRIES    (3)
 #define SHT31_POLL_MS         (500)
 
 static const char *TAG = "SHT31";
@@ -47,11 +50,27 @@ static esp_err_t sht31_send_cmd(uint16_t cmd)
 static esp_err_t sht31_read_measurement(uint16_t *temp_c, uint16_t *humidity_percent)
 {
 	uint8_t data[SHT31_READ_LEN] = {0};
-	ESP_RETURN_ON_ERROR(sht31_send_cmd(SHT31_CMD_MEAS_HIGH), TAG,
-					"measure command failed");
-	vTaskDelay(pdMS_TO_TICKS(15));
-	ESP_RETURN_ON_ERROR(i2c_master_receive(s_sht31_handle, data, sizeof(data), -1), TAG,
-					"read failed");
+	esp_err_t err = ESP_FAIL;
+	for (int attempt = 0; attempt < SHT31_READ_RETRIES; attempt++) {
+		err = sht31_send_cmd(SHT31_CMD_MEAS_HIGH);
+		if (err != ESP_OK) {
+			ESP_LOGW(TAG, "measure command failed (attempt %d/%d): %s",
+					 attempt + 1, SHT31_READ_RETRIES, esp_err_to_name(err));
+			continue;
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(SHT31_MEAS_DELAY_MS));
+		err = i2c_master_receive(s_sht31_handle, data, sizeof(data), -1);
+		if (err == ESP_OK) {
+			break;
+		}
+
+		ESP_LOGW(TAG, "read failed (attempt %d/%d): %s",
+				 attempt + 1, SHT31_READ_RETRIES, esp_err_to_name(err));
+		vTaskDelay(pdMS_TO_TICKS(5));
+	}
+
+	ESP_RETURN_ON_ERROR(err, TAG, "read failed");
 
 	if (sht31_crc8(&data[0], 2) != data[2] || sht31_crc8(&data[3], 2) != data[5]) {
 		ESP_LOGW(TAG, "CRC mismatch");

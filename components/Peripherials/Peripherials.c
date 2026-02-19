@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
+#include "esp_ldo_regulator.h"
 #include "System_Config.h"
 #include "SHT31.h"
 
@@ -27,8 +28,12 @@
 #define I2C_SCL_GPIO          (GPIO_NUM_8)
 #define I2C_FREQ_HZ           (100000)
 
-#define GT911_I2C_ADDR        (0x5D)
+#define GT911_I2C_ADDR_5D     (0x5D)
+#define GT911_I2C_ADDR_14     (0x14)
 #define I2C_PROBE_TIMEOUT_MS  (50)
+
+#define MIPI_DSI_PHY_LDO_CHAN       (3)
+#define MIPI_DSI_PHY_LDO_VOLTAGE_MV (2500)
 
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
 esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
@@ -42,6 +47,7 @@ static bool s_door_state = false;
 static bool s_door_last_raw = false;
 static int64_t s_door_last_change_us = 0;
 static bool s_door_initialized = false;
+static esp_ldo_channel_handle_t s_mipi_phy_ldo = NULL;
 
 static const char *TAG = "Peripherials";
 
@@ -159,6 +165,16 @@ static void init_sht31(void)
 static void init_dsi(void)
 {
 	ESP_LOGI(TAG, "Init MIPI-DSI bus");
+	if (s_mipi_phy_ldo == NULL) {
+		esp_ldo_channel_config_t ldo_cfg = {
+			.chan_id = MIPI_DSI_PHY_LDO_CHAN,
+			.voltage_mv = MIPI_DSI_PHY_LDO_VOLTAGE_MV,
+		};
+		ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_cfg, &s_mipi_phy_ldo));
+		ESP_LOGI(TAG, "MIPI-DSI PHY LDO enabled (chan=%d, %dmV)",
+				 MIPI_DSI_PHY_LDO_CHAN, MIPI_DSI_PHY_LDO_VOLTAGE_MV);
+	}
+
     esp_lcd_dsi_bus_config_t bus_config = {
         .bus_id = 0,
         .num_data_lanes = 2,
@@ -176,8 +192,10 @@ void Peripherials_init(void)
 	System_Config_get_phase_params(&s_ac_half_cycle_us, &s_triac_min_delay_us, &s_triac_pulse_us);
 	init_i2c();
 	init_sht31();
-	if (i2c_master_probe(i2c_bus_handle, GT911_I2C_ADDR, I2C_PROBE_TIMEOUT_MS) == ESP_OK) {
-		ESP_LOGI(TAG, "GT911 detected, init MIPI-DSI bus");
+	if (i2c_master_probe(i2c_bus_handle, GT911_I2C_ADDR_5D, I2C_PROBE_TIMEOUT_MS) == ESP_OK ||
+		i2c_master_probe(i2c_bus_handle, GT911_I2C_ADDR_14, I2C_PROBE_TIMEOUT_MS) == ESP_OK) {
+		ESP_LOGI(TAG, "GT911 detected (0x%02X or 0x%02X), init MIPI-DSI bus",
+				 GT911_I2C_ADDR_5D, GT911_I2C_ADDR_14);
 		init_dsi();
 	} else {
 		ESP_LOGW(TAG, "GT911 not detected, display not connected; skipping MIPI-DSI init");
