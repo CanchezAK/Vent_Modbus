@@ -5,12 +5,19 @@
 #include "esp_lcd_touch_gt911.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "ui.h"
 #include "esp_log.h"
 
 #define LCD_H_RES 720
 #define LCD_V_RES 1280
 
 static const char *TAG = "Display";
+
+static void ui_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    ui_tick();
+}
 
 void Display_init(void)
 {
@@ -114,4 +121,8 @@ void Display_init(void)
     };
     lv_indev_t *touch_indev = lvgl_port_add_touch(&touch_cfg);
     assert(touch_indev);
+
+    // EEZ UI init
+    ui_init();
+    lv_timer_create(ui_timer_cb, 20, NULL);
 }
