@@ -33,6 +33,7 @@ typedef struct {
 void System_Config_init(void);
 void System_Config_set_from_modbus(const system_config_t *cfg);
 void System_Config_set_from_display(const system_config_t *cfg);
+void System_Config_set_from_display_volatile(const system_config_t *cfg);
 void System_Config_set_from_internal(const system_config_t *cfg);
 
 system_config_t System_Config_get_snapshot(system_config_source_t *source, uint32_t *version);
@@ -46,6 +47,9 @@ void System_Config_set_service_hours(uint16_t value);
 void System_Config_get_phase_params(uint32_t *ac_half_cycle_us,
 									 uint32_t *triac_min_delay_us,
 									 uint32_t *triac_pulse_us);
+
+/* Register one task to be notified on config/alarm/service-hours changes */
+void System_Config_register_update_task(void *task_handle);
 
 #ifdef __cplusplus
 }

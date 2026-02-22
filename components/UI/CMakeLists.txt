@@ -5,4 +5,4 @@ idf_component_register(SRCS
                         "src/images.c"
                         "src/styles.c"
                     INCLUDE_DIRS "include" "src"
-                    REQUIRES lvgl System_Config)
+                    REQUIRES lvgl System_Config Modbus_RTU)

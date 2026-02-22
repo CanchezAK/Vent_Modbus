@@ -34,6 +34,9 @@
 
 #define MIPI_DSI_PHY_LDO_CHAN       (3)
 #define MIPI_DSI_PHY_LDO_VOLTAGE_MV (2500)
+// DSI lane speed. 700 is stable baseline for 30Hz operation.
+// Rollback: set back to 700.
+#define MIPI_DSI_LANE_BIT_RATE_MBPS (700)
 
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
 esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
@@ -179,7 +182,7 @@ static void init_dsi(void)
         .bus_id = 0,
         .num_data_lanes = 2,
 		.phy_clk_src = 0,
-		.lane_bit_rate_mbps = 700,
+		.lane_bit_rate_mbps = MIPI_DSI_LANE_BIT_RATE_MBPS,
     };
     ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus));
 	ESP_LOGI(TAG, "MIPI-DSI bus ready");

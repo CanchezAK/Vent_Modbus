@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 
 #include "screens.h"
 #include "images.h"
@@ -7,6 +8,7 @@
 #include "vars.h"
 #include "styles.h"
 #include "ui.h"
+#include "Modbus_RTU.h"
 
 #include <string.h>
 
@@ -40,6 +42,8 @@ static void event_handler_cb_settings_fan_percentage_slider(lv_event_t *e) {
             int32_t value = lv_slider_get_value(ta);
             set_var_fan_percentage(value);
         }
+    } else if (event == LV_EVENT_RELEASED || event == LV_EVENT_PRESS_LOST) {
+        commit_var_fan_percentage();
     }
 }
 
@@ -87,12 +91,49 @@ void create_screen_main() {
                 }
             }
         }
+        {
+            lv_obj_t *obj = lv_label_create(parent_obj);
+            objects.main_temp_label = obj;
+            lv_obj_set_pos(obj, 60, 370);
+            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_text_font(obj, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(obj, lv_color_hex(0xffd6ffd6), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text(obj, "Temp: -- C");
+        }
+        {
+            lv_obj_t *obj = lv_label_create(parent_obj);
+            objects.main_humidity_label = obj;
+            lv_obj_set_pos(obj, 60, 450);
+            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_text_font(obj, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(obj, lv_color_hex(0xffd6ffd6), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_label_set_text(obj, "Humidity: -- %");
+        }
     }
     
     tick_screen_main();
 }
 
 void tick_screen_main() {
+    static uint16_t last_temp = 0xFFFF;
+    static uint16_t last_humidity = 0xFFFF;
+
+    uint16_t temp = 0;
+    uint16_t humidity = 0;
+    if (Modbus_RTU_get_ro_snapshot(&temp, &humidity)) {
+        if (temp != last_temp && objects.main_temp_label) {
+            char text[32];
+            snprintf(text, sizeof(text), "Temp: %u C", (unsigned)temp);
+            lv_label_set_text(objects.main_temp_label, text);
+            last_temp = temp;
+        }
+        if (humidity != last_humidity && objects.main_humidity_label) {
+            char text[32];
+            snprintf(text, sizeof(text), "Humidity: %u %%", (unsigned)humidity);
+            lv_label_set_text(objects.main_humidity_label, text);
+            last_humidity = humidity;
+        }
+    }
 }
 
 void create_screen_settings() {
@@ -120,6 +161,8 @@ void create_screen_settings() {
             lv_obj_set_pos(obj, 565, 196);
             lv_obj_set_size(obj, 150, 10);
             lv_obj_add_event_cb(obj, event_handler_cb_settings_fan_percentage_slider, LV_EVENT_VALUE_CHANGED, 0);
+            lv_obj_add_event_cb(obj, event_handler_cb_settings_fan_percentage_slider, LV_EVENT_RELEASED, 0);
+            lv_obj_add_event_cb(obj, event_handler_cb_settings_fan_percentage_slider, LV_EVENT_PRESS_LOST, 0);
         }
         {
             // main_page_b

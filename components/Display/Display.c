@@ -10,10 +10,14 @@
 #include "ui.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "freertos/task.h"
+#include "System_Config.h"
+#include "Modbus_RTU.h"
 
 #define LCD_H_RES 720
 #define LCD_V_RES 1280
-#define LCD_DRAW_BUF_LINES_FAST 80
+#define LCD_DRAW_BUF_LINES_FAST 120
+#define LCD_DRAW_BUF_LINES_MEDIUM 60
 #define LCD_DRAW_BUF_LINES_SAFE 40
 #define LCD_TRANS_BUF_LINES_SAFE 20
 #define GT911_I2C_ADDR_5D 0x5D
@@ -21,6 +25,14 @@
 #define LCD_BL_GPIO GPIO_NUM_26
 #define LCD_BL_ON_LEVEL 1
 #define DISPLAY_ENABLE_TOUCH 1
+
+// Display refresh target. Set to 30 for instant rollback.
+#define DISPLAY_DPI_REFRESH_HZ 30
+#define DISPLAY_DPI_REFRESH_HZ_FALLBACK 30
+// Enable DSI anti-tearing path for high refresh operation.
+#define DISPLAY_HIGH_REFRESH_AVOID_TEARING 0
+// 60Hz tuning profile (near nominal for this panel timing set)
+#define DISPLAY_DPI_CLOCK_60HZ_MHZ 61
 
 // Rotate UI by 90° clockwise using LVGL software rotation.
 // HX8394 panel driver doesn't support esp_lcd hw swap/mirror.
@@ -33,6 +45,61 @@
 #define TOUCH_MIRROR_Y 0
 
 static const char *TAG = "Display";
+static TaskHandle_t s_ui_sync_task_handle = NULL;
+
+static void ui_sync_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (lvgl_port_lock(0)) {
+            ui_tick();
+            lvgl_port_unlock();
+        }
+    }
+}
+
+static bool display_is_high_refresh(uint32_t refresh_hz)
+{
+    return refresh_hz > 30;
+}
+
+static esp_lcd_dpi_panel_config_t build_dpi_config(uint32_t refresh_hz)
+{
+    esp_lcd_dpi_panel_config_t cfg =
+        HX8394_720_1280_PANEL_30HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+
+    if (refresh_hz == 30) {
+        // Keep vendor-known stable default for fallback.
+        cfg.dpi_clock_freq_mhz = 58;
+    } else if (refresh_hz == 60) {
+        cfg.dpi_clock_freq_mhz = DISPLAY_DPI_CLOCK_60HZ_MHZ;
+        cfg.num_fbs = 2;
+    } else {
+        // Calculate required pixel clock from timing totals:
+        // pclk = (h_total * v_total * refresh_hz)
+        const uint32_t h_total = (uint32_t)cfg.video_timing.h_size +
+                                 (uint32_t)cfg.video_timing.hsync_pulse_width +
+                                 (uint32_t)cfg.video_timing.hsync_back_porch +
+                                 (uint32_t)cfg.video_timing.hsync_front_porch;
+        const uint32_t v_total = (uint32_t)cfg.video_timing.v_size +
+                                 (uint32_t)cfg.video_timing.vsync_pulse_width +
+                                 (uint32_t)cfg.video_timing.vsync_back_porch +
+                                 (uint32_t)cfg.video_timing.vsync_front_porch;
+
+        const uint64_t pixel_clock_hz = (uint64_t)h_total * (uint64_t)v_total * (uint64_t)refresh_hz;
+        // Use nearest MHz to avoid over-clocking panel timing (which can cause image corruption).
+        cfg.dpi_clock_freq_mhz = (uint32_t)((pixel_clock_hz + 500000ULL) / 1000000ULL);
+
+        if (DISPLAY_HIGH_REFRESH_AVOID_TEARING) {
+            // High refresh is much more sensitive to scan/write contention.
+            // Use two frame buffers in DPI engine to reduce corruption/tearing.
+            cfg.num_fbs = 2;
+        }
+    }
+
+    return cfg;
+}
 
 static void log_i2c_scan_for_touch(void)
 {
@@ -50,12 +117,6 @@ static void log_i2c_scan_for_touch(void)
         }
     }
     ESP_LOGI(TAG, "I2C scan done, devices found: %d", found);
-}
-
-static void ui_timer_cb(lv_timer_t *timer)
-{
-    (void)timer;
-    ui_tick();
 }
 
 void Display_init(void)
@@ -83,8 +144,7 @@ void Display_init(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &mipi_dbi_io));
 
     esp_lcd_panel_handle_t panel_handle = NULL;
-    static const esp_lcd_dpi_panel_config_t dpi_config =
-        HX8394_720_1280_PANEL_30HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    esp_lcd_dpi_panel_config_t dpi_config = build_dpi_config(DISPLAY_DPI_REFRESH_HZ);
     hx8394_vendor_config_t vendor_config = {
         .mipi_config = {
             .dsi_bus = mipi_dsi_bus,
@@ -98,7 +158,22 @@ void Display_init(void)
         .bits_per_pixel = 16,
         .vendor_config = &vendor_config,
     };
+    ESP_LOGI(TAG, "Trying display refresh: %u Hz (dpi_clk=%u MHz)",
+             (unsigned)DISPLAY_DPI_REFRESH_HZ,
+             (unsigned)dpi_config.dpi_clock_freq_mhz);
+    ESP_LOGI(TAG, "DPI num_fbs=%u", (unsigned)dpi_config.num_fbs);
+
     esp_err_t ret = esp_lcd_new_panel_hx8394(mipi_dbi_io, &panel_config, &panel_handle);
+    if (ret != ESP_OK && DISPLAY_DPI_REFRESH_HZ != DISPLAY_DPI_REFRESH_HZ_FALLBACK) {
+        ESP_LOGW(TAG, "Display init failed at %u Hz (%s). Fallback to %u Hz",
+                 (unsigned)DISPLAY_DPI_REFRESH_HZ,
+                 esp_err_to_name(ret),
+                 (unsigned)DISPLAY_DPI_REFRESH_HZ_FALLBACK);
+
+        dpi_config = build_dpi_config(DISPLAY_DPI_REFRESH_HZ_FALLBACK);
+        panel_handle = NULL;
+        ret = esp_lcd_new_panel_hx8394(mipi_dbi_io, &panel_config, &panel_handle);
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_lcd_new_panel_hx8394 failed: %s", esp_err_to_name(ret));
         return;
@@ -190,7 +265,9 @@ void Display_init(void)
 
     // LVGL init
     ESP_LOGI(TAG, "LVGL port init");
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    lvgl_cfg.task_affinity = 1; // keep display/touch handling on CPU1
+    lvgl_cfg.task_priority = 5;
     lvgl_port_init(&lvgl_cfg);
 
     // Add display to LVGL
@@ -215,14 +292,23 @@ void Display_init(void)
         }
     };
     ESP_LOGI(TAG, "LVGL add display (DSI)");
+    bool avoid_tearing = DISPLAY_HIGH_REFRESH_AVOID_TEARING && display_is_high_refresh(DISPLAY_DPI_REFRESH_HZ);
     const lvgl_port_display_dsi_cfg_t dsi_disp_cfg = {
         .flags = {
-            .avoid_tearing = 0,
+            .avoid_tearing = avoid_tearing ? 1 : 0,
         },
     };
     lv_disp_t *disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_disp_cfg);
     if (!disp) {
-        ESP_LOGW(TAG, "Fast LVGL buffers failed, fallback to PSRAM buffers");
+        ESP_LOGW(TAG, "Fast DMA LVGL buffers failed, trying medium DMA buffers");
+        disp_cfg.buffer_size = LCD_H_RES * LCD_DRAW_BUF_LINES_MEDIUM;
+        disp_cfg.trans_size = 0;
+        disp_cfg.flags.buff_dma = 1;
+        disp_cfg.flags.buff_spiram = 0;
+        disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_disp_cfg);
+    }
+    if (!disp) {
+        ESP_LOGW(TAG, "Medium DMA LVGL buffers failed, fallback to PSRAM buffers");
         disp_cfg.buffer_size = LCD_H_RES * LCD_DRAW_BUF_LINES_SAFE;
         disp_cfg.trans_size = LCD_H_RES * LCD_TRANS_BUF_LINES_SAFE;
         disp_cfg.flags.buff_dma = 0;
@@ -233,6 +319,12 @@ void Display_init(void)
         ESP_LOGE(TAG, "Failed to add LVGL display");
         return;
     }
+
+    ESP_LOGI(TAG, "LVGL display mode: buffer=%lu px, dma=%u, spiram=%u, trans=%lu px",
+             (unsigned long)disp_cfg.buffer_size,
+             (unsigned)disp_cfg.flags.buff_dma,
+             (unsigned)disp_cfg.flags.buff_spiram,
+             (unsigned long)disp_cfg.trans_size);
 
 #if DISPLAY_ROTATE_90_CW
     lv_disp_set_rotation(disp, LV_DISPLAY_ROTATION_90);
@@ -253,9 +345,26 @@ void Display_init(void)
     ESP_LOGI(TAG, "UI init start");
     if (lvgl_port_lock(0)) {
         ui_init();
-        lv_timer_create(ui_timer_cb, 20, NULL);
         lvgl_port_unlock();
-        ESP_LOGI(TAG, "UI init done");
+        ESP_LOGI(TAG, "UI init done (event-driven, no UI polling timer)");
+
+        if (s_ui_sync_task_handle == NULL) {
+            BaseType_t ok = xTaskCreatePinnedToCore(ui_sync_task,
+                                                    "ui_sync_task",
+                                                    4096,
+                                                    NULL,
+                                                    6,
+                                                    &s_ui_sync_task_handle,
+                                                    1);
+            if (ok == pdPASS) {
+                System_Config_register_update_task((void *)s_ui_sync_task_handle);
+                Modbus_RTU_register_ro_update_task((void *)s_ui_sync_task_handle);
+                xTaskNotifyGive(s_ui_sync_task_handle); // initial sync
+                ESP_LOGI(TAG, "UI sync task started on CPU1");
+            } else {
+                ESP_LOGE(TAG, "Failed to create UI sync task");
+            }
+        }
     } else {
         ESP_LOGE(TAG, "Failed to lock LVGL for UI init");
     }

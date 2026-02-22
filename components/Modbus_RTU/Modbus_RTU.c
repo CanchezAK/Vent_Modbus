@@ -7,6 +7,7 @@
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
 #include "sdkconfig.h"
 #include "System_Config.h"
 #include "SHT31.h"
@@ -63,8 +64,22 @@ typedef struct __attribute__((packed)) {
 
 static holding_rw_params_t holding_rw = {0};
 static holding_ro_params_t holding_ro = {0};
+static portMUX_TYPE s_holding_ro_lock = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_ro_update_task = NULL;
 
 static logic_state_t s_logic_state;
+
+static void notify_ro_update_task(void)
+{
+	TaskHandle_t task = NULL;
+	portENTER_CRITICAL(&s_holding_ro_lock);
+	task = s_ro_update_task;
+	portEXIT_CRITICAL(&s_holding_ro_lock);
+
+	if (task) {
+		xTaskNotifyGive(task);
+	}
+}
 
 static uint8_t clamp_percent(uint16_t value)
 {
@@ -185,6 +200,7 @@ static void modbus_task(void *arg)
 		}
 
 		(void)mbc_slave_lock(mbc_slave_handle);
+		portENTER_CRITICAL(&s_holding_ro_lock);
 		holding_ro.alarm_temp = logic_out.alarm_temp ? 1 : 0;
 		holding_ro.alarm_humidity = logic_out.alarm_humidity ? 1 : 0;
 		holding_ro.alarm_smoke = logic_out.alarm_smoke ? 1 : 0;
@@ -193,7 +209,9 @@ static void modbus_task(void *arg)
 		holding_ro.current_temp = current_temp;
 		holding_ro.current_humidity = current_humidity;
 		holding_ro.smoke_state = logic_in.smoke_state ? 1 : 0;
+		portEXIT_CRITICAL(&s_holding_ro_lock);
 		(void)mbc_slave_unlock(mbc_slave_handle);
+		notify_ro_update_task();
 
 		if (s_fan_callback) {
 			s_fan_callback(logic_out.fan_percent);
@@ -252,11 +270,32 @@ void Modbus_RTU_init(void)
 
 void Modbus_RTU_start_task(void)
 {
-	xTaskCreate(modbus_task, "modbus_task", 4096, NULL, 10, NULL);
+	xTaskCreatePinnedToCore(modbus_task, "modbus_task", 4096, NULL, 10, NULL, 0);
 }
 
 void Modbus_RTU_set_fan_callback(modbus_rtu_fan_control_cb_t callback)
 {
 	s_fan_callback = callback;
+}
+
+bool Modbus_RTU_get_ro_snapshot(uint16_t *current_temp, uint16_t *current_humidity)
+{
+	if (!current_temp || !current_humidity) {
+		return false;
+	}
+
+	portENTER_CRITICAL(&s_holding_ro_lock);
+	*current_temp = holding_ro.current_temp;
+	*current_humidity = holding_ro.current_humidity;
+	portEXIT_CRITICAL(&s_holding_ro_lock);
+
+	return true;
+}
+
+void Modbus_RTU_register_ro_update_task(void *task_handle)
+{
+	portENTER_CRITICAL(&s_holding_ro_lock);
+	s_ro_update_task = (TaskHandle_t)task_handle;
+	portEXIT_CRITICAL(&s_holding_ro_lock);
 }
 

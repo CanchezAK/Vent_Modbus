@@ -1,6 +1,8 @@
 #include "System_Config.h"
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_err.h"
@@ -37,6 +39,7 @@ static uint32_t s_triac_pulse_us = DEFAULT_TRIAC_PULSE_US;
 static uint16_t s_alarm_clr = 0;
 static uint16_t s_service_hours_base = 0;
 static int64_t s_service_hours_base_us = 0;
+static TaskHandle_t s_update_task = NULL;
 
 uint16_t System_Config_get_service_hours(void);
 
@@ -166,16 +169,42 @@ static void save_persisted(const system_config_t *cfg)
 	nvs_close(handle);
 }
 
-static void set_config(const system_config_t *cfg, system_config_source_t source)
+static void notify_update_task(void)
+{
+	TaskHandle_t task = NULL;
+	portENTER_CRITICAL(&s_cfg_lock);
+	task = s_update_task;
+	portEXIT_CRITICAL(&s_cfg_lock);
+
+	if (task) {
+		xTaskNotifyGive(task);
+	}
+}
+
+static void set_config_ex(const system_config_t *cfg, system_config_source_t source, bool persist)
 {
 	system_config_t copy = *cfg;
+	bool changed = false;
 	sanitize(&copy);
 	portENTER_CRITICAL(&s_cfg_lock);
-	s_cfg = copy;
-	s_last_source = source;
-	s_version++;
+	changed = (memcmp(&s_cfg, &copy, sizeof(system_config_t)) != 0);
+	if (changed) {
+		s_cfg = copy;
+		s_last_source = source;
+		s_version++;
+	}
 	portEXIT_CRITICAL(&s_cfg_lock);
-	save_persisted(&copy);
+	if (persist && changed) {
+		save_persisted(&copy);
+	}
+	if (changed) {
+		notify_update_task();
+	}
+}
+
+static void set_config(const system_config_t *cfg, system_config_source_t source)
+{
+	set_config_ex(cfg, source, true);
 }
 
 void System_Config_init(void)
@@ -204,7 +233,7 @@ void System_Config_init(void)
 	load_persisted(&defaults);
 	s_service_hours_base_us = esp_timer_get_time();
 	s_alarm_clr = 0;
-	set_config(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL);
+	set_config_ex(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL, false);
 }
 
 void System_Config_set_from_modbus(const system_config_t *cfg)
@@ -217,7 +246,18 @@ void System_Config_set_from_modbus(const system_config_t *cfg)
 void System_Config_set_from_display(const system_config_t *cfg)
 {
 	if (cfg) {
-		set_config(cfg, SYSTEM_CONFIG_SOURCE_DISPLAY);
+		/*
+		 * Display-origin updates are RAM-only by policy.
+		 * Persistent save from UI must be implemented explicitly (e.g. dedicated Save button).
+		 */
+		set_config_ex(cfg, SYSTEM_CONFIG_SOURCE_DISPLAY, false);
+	}
+}
+
+void System_Config_set_from_display_volatile(const system_config_t *cfg)
+{
+	if (cfg) {
+		set_config_ex(cfg, SYSTEM_CONFIG_SOURCE_DISPLAY, false);
 	}
 }
 
@@ -255,11 +295,18 @@ uint16_t System_Config_get_alarm_clr(void)
 void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value)
 {
 	uint16_t new_value = value ? 1 : 0;
+	bool changed = false;
 	portENTER_CRITICAL(&s_cfg_lock);
-	s_alarm_clr = new_value;
-	s_last_source = source;
-	s_version++;
+	if (s_alarm_clr != new_value) {
+		s_alarm_clr = new_value;
+		s_last_source = source;
+		s_version++;
+		changed = true;
+	}
 	portEXIT_CRITICAL(&s_cfg_lock);
+	if (changed) {
+		notify_update_task();
+	}
 }
 
 uint16_t System_Config_get_service_hours(void)
@@ -286,13 +333,27 @@ uint16_t System_Config_get_service_hours(void)
 void System_Config_set_service_hours(uint16_t value)
 {
 	uint16_t clamped = (value > 10000) ? 10000 : value;
+	bool changed = false;
 	portENTER_CRITICAL(&s_cfg_lock);
-	s_service_hours_base = clamped;
-	s_service_hours_base_us = esp_timer_get_time();
-	s_last_source = SYSTEM_CONFIG_SOURCE_INTERNAL;
-	s_version++;
+	changed = (s_service_hours_base != clamped);
+	if (changed) {
+		s_service_hours_base = clamped;
+		s_service_hours_base_us = esp_timer_get_time();
+		s_last_source = SYSTEM_CONFIG_SOURCE_INTERNAL;
+		s_version++;
+	}
 	portEXIT_CRITICAL(&s_cfg_lock);
-	save_persisted(&s_cfg);
+	if (changed) {
+		save_persisted(&s_cfg);
+		notify_update_task();
+	}
+}
+
+void System_Config_register_update_task(void *task_handle)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	s_update_task = (TaskHandle_t)task_handle;
+	portEXIT_CRITICAL(&s_cfg_lock);
 }
 
 void System_Config_get_phase_params(uint32_t *ac_half_cycle_us,

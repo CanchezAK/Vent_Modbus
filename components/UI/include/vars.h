@@ -22,6 +22,7 @@ enum FlowGlobalVariables {
 
 extern int32_t get_var_fan_percentage();
 extern void set_var_fan_percentage(int32_t value);
+extern void commit_var_fan_percentage(void);
 
 
 #ifdef __cplusplus

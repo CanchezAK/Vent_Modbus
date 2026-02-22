@@ -13,6 +13,8 @@ typedef struct _objects_t {
     lv_obj_t *obj0;
     lv_obj_t *settings_page_b;
     lv_obj_t *obj1;
+    lv_obj_t *main_temp_label;
+    lv_obj_t *main_humidity_label;
     lv_obj_t *fan_percentage_slider;
     lv_obj_t *main_page_b;
     lv_obj_t *alarm_clr_b;
