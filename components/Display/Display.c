@@ -13,7 +13,9 @@
 
 #define LCD_H_RES 720
 #define LCD_V_RES 1280
-#define LCD_DRAW_BUF_LINES 40
+#define LCD_DRAW_BUF_LINES_FAST 80
+#define LCD_DRAW_BUF_LINES_SAFE 40
+#define LCD_TRANS_BUF_LINES_SAFE 20
 #define GT911_I2C_ADDR_5D 0x5D
 #define GT911_I2C_ADDR_14 0x14
 #define LCD_BL_GPIO GPIO_NUM_26
@@ -192,17 +194,18 @@ void Display_init(void)
     lvgl_port_init(&lvgl_cfg);
 
     // Add display to LVGL
-    const lvgl_port_display_cfg_t disp_cfg = {
+    lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = NULL,
         .panel_handle = panel_handle,
-        .buffer_size = LCD_H_RES * LCD_DRAW_BUF_LINES,
+        .buffer_size = LCD_H_RES * LCD_DRAW_BUF_LINES_FAST,
         .double_buffer = true,
+        .trans_size = 0,
         .hres = LCD_H_RES,
         .vres = LCD_V_RES,
         .monochrome = false,
         .flags = {
-            .buff_dma = 0,
-            .buff_spiram = 1,
+            .buff_dma = 1,
+            .buff_spiram = 0,
             .sw_rotate = DISPLAY_SW_ROTATE,
         },
         .rotation = {
@@ -218,7 +221,18 @@ void Display_init(void)
         },
     };
     lv_disp_t *disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_disp_cfg);
-    assert(disp);
+    if (!disp) {
+        ESP_LOGW(TAG, "Fast LVGL buffers failed, fallback to PSRAM buffers");
+        disp_cfg.buffer_size = LCD_H_RES * LCD_DRAW_BUF_LINES_SAFE;
+        disp_cfg.trans_size = LCD_H_RES * LCD_TRANS_BUF_LINES_SAFE;
+        disp_cfg.flags.buff_dma = 0;
+        disp_cfg.flags.buff_spiram = 1;
+        disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_disp_cfg);
+    }
+    if (!disp) {
+        ESP_LOGE(TAG, "Failed to add LVGL display");
+        return;
+    }
 
 #if DISPLAY_ROTATE_90_CW
     lv_disp_set_rotation(disp, LV_DISPLAY_ROTATION_90);
