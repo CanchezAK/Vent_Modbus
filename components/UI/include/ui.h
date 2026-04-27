@@ -3,6 +3,12 @@
 
 #include <lvgl.h>
 
+
+
+#if defined(EEZ_FOR_LVGL)
+#include <eez/flow/lvgl_api.h>
+#endif
+
 #if !defined(EEZ_FOR_LVGL)
 #include "screens.h"
 #endif

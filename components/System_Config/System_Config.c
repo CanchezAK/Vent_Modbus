@@ -24,9 +24,24 @@
 #define DEFAULT_MODE                 (0)
 #define DEFAULT_FAN_MANUAL_PERCENT   (0)
 #define DEFAULT_FAN_MIN_PERCENT      (0)
+#define DEFAULT_FILTER_LIMIT_HOURS   (1)
 #define DEFAULT_SMOKE_ENABLE         (1)
 #define DEFAULT_SYSTEM_ENABLE        (1)
 #define DEFAULT_MODBUS_BAUD_INDEX    (3)
+
+/* TEMP DEBUG: speed up service runtime accumulation only in debug builds.
+ * 60x means 1 real minute equals 1 service hour.
+ */
+#if CONFIG_COMPILER_OPTIMIZATION_DEBUG
+#define TEMP_DEBUG_SERVICE_TIME_SCALE (60ULL)
+#else
+#define TEMP_DEBUG_SERVICE_TIME_SCALE (1ULL)
+#endif
+
+#define MODE_MANUAL_BIT              (1U << 0)
+#define MODE_AUTOSTART_TEMP_BIT      (1U << 1)
+#define MODE_AUTOSTART_HUMIDITY_BIT  (1U << 2)
+#define MODE_MASK_BITS (MODE_MANUAL_BIT | MODE_AUTOSTART_TEMP_BIT | MODE_AUTOSTART_HUMIDITY_BIT)
 
 static portMUX_TYPE s_cfg_lock = portMUX_INITIALIZER_UNLOCKED;
 static system_config_t s_cfg = {0};
@@ -91,10 +106,11 @@ static void sanitize(system_config_t *cfg)
 		return;
 	}
 	cfg->fan_manual_percent = clamp_percent(cfg->fan_manual_percent);
-	cfg->fan_min_percent = clamp_percent(cfg->fan_min_percent);
+	cfg->fan_min_percent = cfg->fan_manual_percent;
 	cfg->filter_limit_hours = (cfg->filter_limit_hours > 10000) ? 10000 : cfg->filter_limit_hours;
-	cfg->mode = (cfg->mode > 2) ? 0 : cfg->mode;
-	cfg->system_enable = cfg->system_enable ? 1 : 0;
+	cfg->mode = cfg->mode & MODE_MASK_BITS;
+	/* UI has no system-enable control; keep runtime logic enabled to avoid hidden-off conflicts. */
+	cfg->system_enable = 1;
 	cfg->smoke_enable = cfg->smoke_enable ? 1 : 0;
 	cfg->modbus_addr = sanitize_addr(cfg->modbus_addr);
 	cfg->modbus_baud = sanitize_baud_index(cfg->modbus_baud);
@@ -194,7 +210,7 @@ static void set_config_ex(const system_config_t *cfg, system_config_source_t sou
 		s_version++;
 	}
 	portEXIT_CRITICAL(&s_cfg_lock);
-	if (persist && changed) {
+	if (persist) {
 		save_persisted(&copy);
 	}
 	if (changed) {
@@ -219,7 +235,7 @@ void System_Config_init(void)
 		.mode = DEFAULT_MODE,
 		.fan_manual_percent = DEFAULT_FAN_MANUAL_PERCENT,
 		.fan_min_percent = DEFAULT_FAN_MIN_PERCENT,
-		.filter_limit_hours = 0,
+		.filter_limit_hours = DEFAULT_FILTER_LIMIT_HOURS,
 		.system_enable = DEFAULT_SYSTEM_ENABLE,
 		.smoke_enable = DEFAULT_SMOKE_ENABLE,
 		.modbus_addr = 1,
@@ -231,6 +247,9 @@ void System_Config_init(void)
 		(void)nvs_flash_init();
 	}
 	load_persisted(&defaults);
+	if (defaults.filter_limit_hours == 0) {
+		defaults.filter_limit_hours = DEFAULT_FILTER_LIMIT_HOURS;
+	}
 	s_service_hours_base_us = esp_timer_get_time();
 	s_alarm_clr = 0;
 	set_config_ex(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL, false);
@@ -258,6 +277,13 @@ void System_Config_set_from_display_volatile(const system_config_t *cfg)
 {
 	if (cfg) {
 		set_config_ex(cfg, SYSTEM_CONFIG_SOURCE_DISPLAY, false);
+	}
+}
+
+void System_Config_set_from_display_persist(const system_config_t *cfg)
+{
+	if (cfg) {
+		set_config_ex(cfg, SYSTEM_CONFIG_SOURCE_DISPLAY, true);
 	}
 }
 
@@ -311,40 +337,65 @@ void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value)
 
 uint16_t System_Config_get_service_hours(void)
 {
+	uint32_t total_seconds = System_Config_get_service_seconds();
+	uint32_t total_hours = total_seconds / 3600U;
+	if (total_hours > 10000U) {
+		total_hours = 10000U;
+	}
+	return (uint16_t)total_hours;
+}
+
+uint32_t System_Config_get_service_seconds(void)
+{
 	uint16_t base;
 	int64_t base_us;
 	portENTER_CRITICAL(&s_cfg_lock);
 	base = s_service_hours_base;
 	base_us = s_service_hours_base_us;
 	portEXIT_CRITICAL(&s_cfg_lock);
+
 	int64_t now_us = esp_timer_get_time();
 	int64_t delta_us = now_us - base_us;
 	if (delta_us < 0) {
 		delta_us = 0;
 	}
-	uint32_t added = (uint32_t)(delta_us / (3600LL * 1000000LL));
-	uint32_t total = (uint32_t)base + added;
-	if (total > 10000) {
-		total = 10000;
+
+	uint64_t base_seconds = (uint64_t)base * 3600ULL;
+	uint64_t added_seconds = (uint64_t)(delta_us / 1000000LL);
+	added_seconds *= TEMP_DEBUG_SERVICE_TIME_SCALE;
+	uint64_t total_seconds = base_seconds + added_seconds;
+	uint64_t max_seconds = 10000ULL * 3600ULL;
+	if (total_seconds > max_seconds) {
+		total_seconds = max_seconds;
 	}
-	return (uint16_t)total;
+
+	return (uint32_t)total_seconds;
 }
 
 void System_Config_set_service_hours(uint16_t value)
 {
 	uint16_t clamped = (value > 10000) ? 10000 : value;
 	bool changed = false;
+	bool base_changed = false;
+	int64_t now_us = esp_timer_get_time();
 	portENTER_CRITICAL(&s_cfg_lock);
-	changed = (s_service_hours_base != clamped);
+	base_changed = (s_service_hours_base != clamped);
+	/*
+	 * Even when the integer hour value is unchanged (e.g. clear 0 -> 0),
+	 * we still need to reset elapsed fractional time by updating base_us.
+	 */
+	changed = base_changed || (now_us > s_service_hours_base_us);
+	s_service_hours_base = clamped;
+	s_service_hours_base_us = now_us;
 	if (changed) {
-		s_service_hours_base = clamped;
-		s_service_hours_base_us = esp_timer_get_time();
 		s_last_source = SYSTEM_CONFIG_SOURCE_INTERNAL;
 		s_version++;
 	}
 	portEXIT_CRITICAL(&s_cfg_lock);
-	if (changed) {
+	if (base_changed) {
 		save_persisted(&s_cfg);
+	}
+	if (changed) {
 		notify_update_task();
 	}
 }

@@ -8,6 +8,9 @@ typedef struct {
 	bool alarm_temp_latched;
 	bool alarm_humidity_latched;
 	bool alarm_smoke_latched;
+	bool alarm_fan_latched;
+	bool alarm_filter_latched;
+	uint16_t last_alarm_clr;
 	bool door_boost_active;
 	uint8_t door_boost_base;
 } logic_state_t;

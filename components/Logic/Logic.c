@@ -1,10 +1,47 @@
 #include "Logic.h"
 #include "logic_internal.h"
-#include "logic_modes.h"
 
-#define MODE_AUTO        (0)
-#define MODE_VENTILATION (1)
-#define MODE_EXHAUST     (2)
+#define MODE_MANUAL_BIT              (1U << 0)
+#define MODE_AUTOSTART_TEMP_BIT      (1U << 1)
+#define MODE_AUTOSTART_HUMIDITY_BIT  (1U << 2)
+#define AUTO_ALARM_DELTA             (10U)
+
+/* TEMPORARY: disable smoke alarm path until smoke sensor is physically installed */
+#define TEMP_DISABLE_SMOKE_ALARM     (1U)
+
+static uint8_t compute_auto_channel_percent(uint16_t current_value,
+										uint16_t desired_value,
+										uint8_t min_percent,
+										bool *alarm_active)
+{
+	if (current_value <= desired_value) {
+		if (alarm_active) {
+			*alarm_active = false;
+		}
+		return 0;
+	}
+
+	uint16_t alarm_value = (uint16_t)(desired_value + AUTO_ALARM_DELTA);
+	if (alarm_value < desired_value) {
+		alarm_value = UINT16_MAX;
+	}
+
+	if (alarm_active) {
+		*alarm_active = (current_value >= alarm_value);
+	}
+
+	uint32_t exceed = (uint32_t)(current_value - desired_value);
+	if (exceed >= AUTO_ALARM_DELTA) {
+		return 100;
+	}
+
+	uint32_t scale = (uint32_t)(100U - min_percent);
+	uint32_t value = (uint32_t)min_percent + ((exceed * scale) + (AUTO_ALARM_DELTA / 2U)) / AUTO_ALARM_DELTA;
+	if (value > 100U) {
+		value = 100U;
+	}
+	return (uint8_t)value;
+}
 
 uint8_t Logic_clamp_percent(uint16_t value)
 {
@@ -62,6 +99,9 @@ void Logic_init(logic_state_t *state)
 	state->alarm_temp_latched = false;
 	state->alarm_humidity_latched = false;
 	state->alarm_smoke_latched = false;
+	state->alarm_fan_latched = false;
+	state->alarm_filter_latched = false;
+	state->last_alarm_clr = 0;
 	state->door_boost_active = false;
 	state->door_boost_base = 0;
 }
@@ -87,11 +127,17 @@ void Logic_step(logic_state_t *state,
 		state->alarm_temp_latched = false;
 		state->alarm_humidity_latched = false;
 		state->alarm_smoke_latched = false;
+		state->alarm_fan_latched = false;
+		state->alarm_filter_latched = false;
+		state->last_alarm_clr = alarm_clr;
 		state->door_boost_active = false;
 		return;
 	}
 
 	bool smoke_enabled = cfg->smoke_enable != 0;
+#if TEMP_DISABLE_SMOKE_ALARM
+	smoke_enabled = false;
+#endif
 	if (!smoke_enabled) {
 		state->alarm_smoke_latched = false;
 	}
@@ -99,18 +145,41 @@ void Logic_step(logic_state_t *state,
 	bool temp_alarm_active = false;
 	bool hum_alarm_active = false;
 	uint8_t fan_percent = 0;
+	uint16_t mode_flags = cfg->mode;
+	bool manual_enabled = (mode_flags & MODE_MANUAL_BIT) != 0;
+	bool auto_temp_enabled = (mode_flags & MODE_AUTOSTART_TEMP_BIT) != 0;
+	bool auto_humidity_enabled = (mode_flags & MODE_AUTOSTART_HUMIDITY_BIT) != 0;
+	uint8_t manual_percent = Logic_clamp_percent(cfg->fan_manual_percent);
+	/*
+	 * Single source of truth for fan setpoint from UI/Modbus:
+	 * auto-min and manual setpoint are the same parameter.
+	 */
+	uint8_t min_percent = manual_percent;
 
-	switch (cfg->mode) {
-	case MODE_VENTILATION:
-		Logic_mode_ventilation(cfg, input, state, &temp_alarm_active, &hum_alarm_active, &fan_percent);
-		break;
-	case MODE_EXHAUST:
-		Logic_mode_exhaust(cfg, input, &temp_alarm_active, &fan_percent);
-		break;
-	case MODE_AUTO:
-	default:
-		Logic_mode_auto(cfg, input, &temp_alarm_active, &hum_alarm_active, &fan_percent);
-		break;
+	if (manual_enabled) {
+		fan_percent = manual_percent;
+		uint32_t temp_alarm_value = (uint32_t)cfg->temp_desired + AUTO_ALARM_DELTA;
+		uint32_t hum_alarm_value = (uint32_t)cfg->humidity_desired + AUTO_ALARM_DELTA;
+		temp_alarm_active = (uint32_t)input->current_temp >= temp_alarm_value;
+		hum_alarm_active = (uint32_t)input->current_humidity >= hum_alarm_value;
+	} else {
+		uint8_t temp_percent = 0;
+		uint8_t hum_percent = 0;
+
+		if (auto_temp_enabled) {
+			temp_percent = compute_auto_channel_percent(input->current_temp,
+											cfg->temp_desired,
+											min_percent,
+											&temp_alarm_active);
+		}
+		if (auto_humidity_enabled) {
+			hum_percent = compute_auto_channel_percent(input->current_humidity,
+										cfg->humidity_desired,
+										min_percent,
+										&hum_alarm_active);
+		}
+
+		fan_percent = (temp_percent > hum_percent) ? temp_percent : hum_percent;
 	}
 
 	if (temp_alarm_active) {
@@ -122,8 +191,17 @@ void Logic_step(logic_state_t *state,
 	if (smoke_enabled && input->smoke_state) {
 		state->alarm_smoke_latched = true;
 	}
+	if (input->fan_alarm) {
+		state->alarm_fan_latched = true;
+	}
+	if (input->filter_alarm) {
+		state->alarm_filter_latched = true;
+	}
 
-	if (alarm_clr == 0) {
+	bool clear_request = (state->last_alarm_clr != 0U) && (alarm_clr == 0U);
+	state->last_alarm_clr = alarm_clr;
+
+	if (clear_request) {
 		if (!temp_alarm_active) {
 			state->alarm_temp_latched = false;
 		}
@@ -133,14 +211,16 @@ void Logic_step(logic_state_t *state,
 		if (!(smoke_enabled && input->smoke_state)) {
 			state->alarm_smoke_latched = false;
 		}
+		if (!input->fan_alarm) {
+			state->alarm_fan_latched = false;
+		}
+		if (!input->filter_alarm) {
+			state->alarm_filter_latched = false;
+		}
 	}
 
 	bool any_alarm = state->alarm_temp_latched || state->alarm_humidity_latched || state->alarm_smoke_latched;
 	if (smoke_enabled && input->smoke_state) {
-		fan_percent = (cfg->mode == MODE_EXHAUST) ? 0 : 100;
-	} else if (cfg->mode != MODE_VENTILATION && (state->alarm_temp_latched || state->alarm_humidity_latched)) {
-		fan_percent = 100;
-	} else if (cfg->mode == MODE_VENTILATION && (state->alarm_temp_latched || state->alarm_humidity_latched)) {
 		fan_percent = 100;
 	}
 	if (input->fan_alarm) {
@@ -151,8 +231,8 @@ void Logic_step(logic_state_t *state,
 	output->alarm_temp = state->alarm_temp_latched;
 	output->alarm_humidity = state->alarm_humidity_latched;
 	output->alarm_smoke = state->alarm_smoke_latched;
-	output->alarm_fan = input->fan_alarm;
-	output->alarm_filter = input->filter_alarm;
+	output->alarm_fan = state->alarm_fan_latched;
+	output->alarm_filter = state->alarm_filter_latched;
 
 	(void)any_alarm;
 }

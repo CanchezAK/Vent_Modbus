@@ -216,6 +216,11 @@ void Peripherials_set_fan(uint8_t percent)
 	}
 }
 
+uint8_t Peripherials_get_fan_percent(void)
+{
+	return fan1_percent;
+}
+
 bool Peripherials_get_door_state(void)
 {
 	bool raw_closed = gpio_get_level(DOOR_SWITCH_GPIO) != 0;

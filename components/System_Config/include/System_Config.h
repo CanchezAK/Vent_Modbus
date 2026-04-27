@@ -34,6 +34,7 @@ void System_Config_init(void);
 void System_Config_set_from_modbus(const system_config_t *cfg);
 void System_Config_set_from_display(const system_config_t *cfg);
 void System_Config_set_from_display_volatile(const system_config_t *cfg);
+void System_Config_set_from_display_persist(const system_config_t *cfg);
 void System_Config_set_from_internal(const system_config_t *cfg);
 
 system_config_t System_Config_get_snapshot(system_config_source_t *source, uint32_t *version);
@@ -42,6 +43,7 @@ uint16_t System_Config_get_alarm_clr(void);
 void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value);
 
 uint16_t System_Config_get_service_hours(void);
+uint32_t System_Config_get_service_seconds(void);
 void System_Config_set_service_hours(uint16_t value);
 
 void System_Config_get_phase_params(uint32_t *ac_half_cycle_us,
