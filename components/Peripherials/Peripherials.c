@@ -14,18 +14,21 @@
 #include "System_Config.h"
 #include "SHT31.h"
 
-#define FAN_COOLER_ONE_GPIO  (GPIO_NUM_10)
-#define ZERO_CROSS_GPIO      (GPIO_NUM_12)
-#define DOOR_SWITCH_GPIO     (GPIO_NUM_13)
-#define SMOKE_SENSOR_GPIO    (GPIO_NUM_14)
+#define FAN_COOLER_ONE_GPIO  (GPIO_NUM_6)
+#define ZERO_CROSS_GPIO      (GPIO_NUM_48)
+#define TRIAC_STATE_GPIO     (GPIO_NUM_47)
+#define BUZZER_GPIO          (GPIO_NUM_4)
+#define DOOR_SWITCH_GPIO     (GPIO_NUM_26)
+#define SMOKE_SENSOR_GPIO    (GPIO_NUM_45)
 #define DOOR_DEBOUNCE_US     (50000)
+#define FAN_ALARM_DEBOUNCE_US (1000000)
 
 #define DEFAULT_AC_HALF_CYCLE_US     (10000)
 #define DEFAULT_TRIAC_PULSE_US       (100)
 #define DEFAULT_TRIAC_MIN_DELAY_US   (200)
 
-#define I2C_SDA_GPIO          (GPIO_NUM_7)
-#define I2C_SCL_GPIO          (GPIO_NUM_8)
+#define I2C_SDA_GPIO          (GPIO_NUM_3)
+#define I2C_SCL_GPIO          (GPIO_NUM_2)
 #define I2C_FREQ_HZ           (100000)
 
 #define GT911_I2C_ADDR_5D     (0x5D)
@@ -51,6 +54,9 @@ static bool s_door_last_raw = false;
 static int64_t s_door_last_change_us = 0;
 static bool s_door_initialized = false;
 static esp_ldo_channel_handle_t s_mipi_phy_ldo = NULL;
+static bool s_fan_alarm_state = false;
+static int64_t s_fan_alarm_mismatch_since_us = 0;
+static int64_t s_fan_alarm_match_since_us = 0;
 
 static const char *TAG = "Peripherials";
 
@@ -101,7 +107,7 @@ static void zero_cross_task(void *arg)
 static void init_gpio(void)
 {
 	gpio_config_t io_conf = {
-		.pin_bit_mask = (1ULL << FAN_COOLER_ONE_GPIO),
+		.pin_bit_mask = (1ULL << FAN_COOLER_ONE_GPIO) | (1ULL << BUZZER_GPIO),
 		.mode = GPIO_MODE_OUTPUT,
 		.pull_up_en = GPIO_PULLUP_DISABLE,
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -109,6 +115,7 @@ static void init_gpio(void)
 	};
 	ESP_ERROR_CHECK(gpio_config(&io_conf));
 	ESP_ERROR_CHECK(gpio_set_level(FAN_COOLER_ONE_GPIO, 0));
+	ESP_ERROR_CHECK(gpio_set_level(BUZZER_GPIO, 0));
 
 	gpio_config_t zc_conf = {
 		.pin_bit_mask = (1ULL << ZERO_CROSS_GPIO),
@@ -122,7 +129,8 @@ static void init_gpio(void)
 	ESP_ERROR_CHECK(gpio_isr_handler_add(ZERO_CROSS_GPIO, zero_cross_isr, NULL));
 
 	gpio_config_t input_conf = {
-		.pin_bit_mask = (1ULL << DOOR_SWITCH_GPIO) | (1ULL << SMOKE_SENSOR_GPIO),
+		.pin_bit_mask = (1ULL << DOOR_SWITCH_GPIO) | (1ULL << SMOKE_SENSOR_GPIO) |
+					(1ULL << TRIAC_STATE_GPIO),
 		.mode = GPIO_MODE_INPUT,
 		.pull_up_en = GPIO_PULLUP_ENABLE,
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -216,6 +224,11 @@ void Peripherials_set_fan(uint8_t percent)
 	}
 }
 
+void Peripherials_set_buzzer(bool enabled)
+{
+	gpio_set_level(BUZZER_GPIO, enabled ? 1 : 0);
+}
+
 uint8_t Peripherials_get_fan_percent(void)
 {
 	return fan1_percent;
@@ -250,5 +263,33 @@ bool Peripherials_get_smoke_state(void)
 
 bool Peripherials_get_fan_alarm_state(void)
 {
-	return false;
+	bool output_present = gpio_get_level(TRIAC_STATE_GPIO) != 0;
+	bool should_be_on = (fan1_percent > 0);
+	bool mismatch = (should_be_on != output_present);
+	int64_t now_us = esp_timer_get_time();
+
+	if (mismatch) {
+		s_fan_alarm_match_since_us = 0;
+		if (s_fan_alarm_mismatch_since_us == 0) {
+			s_fan_alarm_mismatch_since_us = now_us;
+		}
+		if (!s_fan_alarm_state &&
+			(now_us - s_fan_alarm_mismatch_since_us) >= FAN_ALARM_DEBOUNCE_US) {
+			s_fan_alarm_state = true;
+		}
+	} else {
+		s_fan_alarm_mismatch_since_us = 0;
+		if (s_fan_alarm_state) {
+			if (s_fan_alarm_match_since_us == 0) {
+				s_fan_alarm_match_since_us = now_us;
+			}
+			if ((now_us - s_fan_alarm_match_since_us) >= FAN_ALARM_DEBOUNCE_US) {
+				s_fan_alarm_state = false;
+			}
+		} else {
+			s_fan_alarm_match_since_us = 0;
+		}
+	}
+
+	return s_fan_alarm_state;
 }

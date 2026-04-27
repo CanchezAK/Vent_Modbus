@@ -247,8 +247,10 @@ static void modbus_task(void *arg)
 			.filter_alarm = filter_alarm,
 		};
 		Logic_step(&s_logic_state, &cfg, alarm_clr, &logic_in, &logic_out);
-		if (logic_out.alarm_temp || logic_out.alarm_humidity || logic_out.alarm_smoke ||
-			logic_out.alarm_fan || logic_out.alarm_filter) {
+		bool any_alarm = logic_out.alarm_temp || logic_out.alarm_humidity || logic_out.alarm_smoke ||
+			logic_out.alarm_fan || logic_out.alarm_filter;
+		Peripherials_set_buzzer(any_alarm);
+		if (any_alarm) {
 			System_Config_set_alarm_clr(SYSTEM_CONFIG_SOURCE_INTERNAL, 1);
 			write_holding_from_config(&cfg);
 		}
