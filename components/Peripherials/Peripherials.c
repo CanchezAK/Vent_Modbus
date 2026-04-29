@@ -18,7 +18,7 @@
 #define ZERO_CROSS_GPIO      (GPIO_NUM_48)
 #define TRIAC_STATE_GPIO     (GPIO_NUM_47)
 #define BUZZER_GPIO          (GPIO_NUM_4)
-#define DOOR_SWITCH_GPIO     (GPIO_NUM_26)
+#define DOOR_SWITCH_GPIO     (GPIO_NUM_32)
 #define SMOKE_SENSOR_GPIO    (GPIO_NUM_45)
 #define DOOR_DEBOUNCE_US     (50000)
 #define FAN_ALARM_DEBOUNCE_US (1000000)
@@ -27,8 +27,8 @@
 #define DEFAULT_TRIAC_PULSE_US       (100)
 #define DEFAULT_TRIAC_MIN_DELAY_US   (200)
 
-#define I2C_SDA_GPIO          (GPIO_NUM_3)
-#define I2C_SCL_GPIO          (GPIO_NUM_2)
+#define I2C_SDA_GPIO          (GPIO_NUM_7)
+#define I2C_SCL_GPIO          (GPIO_NUM_8)
 #define I2C_FREQ_HZ           (100000)
 
 #define GT911_I2C_ADDR_5D     (0x5D)
