@@ -27,8 +27,10 @@
 #define DEFAULT_TRIAC_PULSE_US       (100)
 #define DEFAULT_TRIAC_MIN_DELAY_US   (200)
 
-#define I2C_SDA_GPIO          (GPIO_NUM_7)
-#define I2C_SCL_GPIO          (GPIO_NUM_8)
+#define I2C_DISPLAY_SDA_GPIO  (GPIO_NUM_7)
+#define I2C_DISPLAY_SCL_GPIO  (GPIO_NUM_8)
+#define I2C_SENSORS_SDA_GPIO  (GPIO_NUM_3)
+#define I2C_SENSORS_SCL_GPIO  (GPIO_NUM_2)
 #define I2C_FREQ_HZ           (100000)
 
 #define GT911_I2C_ADDR_5D     (0x5D)
@@ -42,6 +44,7 @@
 #define MIPI_DSI_LANE_BIT_RATE_MBPS (700)
 
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
+i2c_master_bus_handle_t i2c_bus_sensors_handle = NULL;
 esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
 static esp_timer_handle_t fan1_timer = NULL;
 static TaskHandle_t zero_cross_task_handle = NULL;
@@ -149,13 +152,13 @@ static void init_phase_control(void)
 	xTaskCreate(zero_cross_task, "zero_cross_task", 2048, NULL, 12, &zero_cross_task_handle);
 }
 
-static void init_i2c(void)
+static void init_i2c_display(void)
 {
-	ESP_LOGI(TAG, "Init I2C bus");
+	ESP_LOGI(TAG, "Init I2C display bus");
 	i2c_master_bus_config_t bus_config = {
 		.i2c_port = I2C_NUM_0,
-		.sda_io_num = I2C_SDA_GPIO,
-		.scl_io_num = I2C_SCL_GPIO,
+		.sda_io_num = I2C_DISPLAY_SDA_GPIO,
+		.scl_io_num = I2C_DISPLAY_SCL_GPIO,
 		.clk_source = I2C_CLK_SRC_DEFAULT,
 		.glitch_ignore_cnt = 7,
 		.flags = {
@@ -163,12 +166,29 @@ static void init_i2c(void)
 		},
 	};
 	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus_handle));
-	ESP_LOGI(TAG, "I2C bus ready");
+	ESP_LOGI(TAG, "I2C display bus ready");
+}
+
+static void init_i2c_sensors(void)
+{
+	ESP_LOGI(TAG, "Init I2C sensors bus");
+	i2c_master_bus_config_t bus_config = {
+		.i2c_port = I2C_NUM_1,
+		.sda_io_num = I2C_SENSORS_SDA_GPIO,
+		.scl_io_num = I2C_SENSORS_SCL_GPIO,
+		.clk_source = I2C_CLK_SRC_DEFAULT,
+		.glitch_ignore_cnt = 7,
+		.flags = {
+			.enable_internal_pullup = true,
+		},
+	};
+	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus_sensors_handle));
+	ESP_LOGI(TAG, "I2C sensors bus ready");
 }
 
 static void init_sht31(void)
 {
-	if (!SHT31_init(i2c_bus_handle)) {
+	if (!SHT31_init(i2c_bus_sensors_handle)) {
 		ESP_LOGW(TAG, "SHT31 not detected, sensor disabled");
 	}
 }
@@ -201,7 +221,8 @@ void Peripherials_init(void)
 	init_gpio();
 	init_phase_control();
 	System_Config_get_phase_params(&s_ac_half_cycle_us, &s_triac_min_delay_us, &s_triac_pulse_us);
-	init_i2c();
+	init_i2c_display();
+	init_i2c_sensors();
 	init_sht31();
 	if (i2c_master_probe(i2c_bus_handle, GT911_I2C_ADDR_5D, I2C_PROBE_TIMEOUT_MS) == ESP_OK ||
 		i2c_master_probe(i2c_bus_handle, GT911_I2C_ADDR_14, I2C_PROBE_TIMEOUT_MS) == ESP_OK) {
