@@ -1,6 +1,9 @@
 # Build directory
 /build/
 
+# Managed components
+/managed_components/
+
 # Only root-level markdown and PDF files
 /*.md
 /*.pdf
