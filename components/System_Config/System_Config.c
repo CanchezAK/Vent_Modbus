@@ -6,7 +6,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_err.h"
-#include "esp_timer.h"
+#include "esp_private/esp_clk.h"
 #include "sdkconfig.h"
 
 #define DEFAULT_TEMP_DESIRED         (25)
@@ -54,6 +54,8 @@ static uint32_t s_triac_pulse_us = DEFAULT_TRIAC_PULSE_US;
 static uint16_t s_alarm_clr = 0;
 static uint16_t s_service_hours_base = 0;
 static int64_t s_service_hours_base_us = 0;
+static uint64_t s_service_hours_last_rtc_us = 0;
+static uint64_t s_service_hours_rtc_wrap_offset_us = 0;
 static TaskHandle_t s_update_task = NULL;
 
 uint16_t System_Config_get_service_hours(void);
@@ -98,6 +100,20 @@ static uint16_t sanitize_addr(uint16_t addr)
 		return 1;
 	}
 	return addr;
+}
+
+static uint64_t get_rtc_monotonic_us(void)
+{
+	uint64_t now = (uint64_t)esp_clk_rtc_time();
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (s_service_hours_last_rtc_us != 0 && now < s_service_hours_last_rtc_us) {
+		/* RTC time is 48-bit and can wrap; extend to monotonic 64-bit. */
+		s_service_hours_rtc_wrap_offset_us += (1ULL << 48);
+	}
+	s_service_hours_last_rtc_us = now;
+	uint64_t extended = s_service_hours_rtc_wrap_offset_us + now;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return extended;
 }
 
 static void sanitize(system_config_t *cfg)
@@ -250,7 +266,7 @@ void System_Config_init(void)
 	if (defaults.filter_limit_hours == 0) {
 		defaults.filter_limit_hours = DEFAULT_FILTER_LIMIT_HOURS;
 	}
-	s_service_hours_base_us = esp_timer_get_time();
+	s_service_hours_base_us = (int64_t)get_rtc_monotonic_us();
 	s_alarm_clr = 0;
 	set_config_ex(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL, false);
 }
@@ -354,7 +370,7 @@ uint32_t System_Config_get_service_seconds(void)
 	base_us = s_service_hours_base_us;
 	portEXIT_CRITICAL(&s_cfg_lock);
 
-	int64_t now_us = esp_timer_get_time();
+	int64_t now_us = (int64_t)get_rtc_monotonic_us();
 	int64_t delta_us = now_us - base_us;
 	if (delta_us < 0) {
 		delta_us = 0;
@@ -377,7 +393,7 @@ void System_Config_set_service_hours(uint16_t value)
 	uint16_t clamped = (value > 10000) ? 10000 : value;
 	bool changed = false;
 	bool base_changed = false;
-	int64_t now_us = esp_timer_get_time();
+	int64_t now_us = (int64_t)get_rtc_monotonic_us();
 	portENTER_CRITICAL(&s_cfg_lock);
 	base_changed = (s_service_hours_base != clamped);
 	/*
