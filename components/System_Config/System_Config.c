@@ -29,6 +29,11 @@
 #define DEFAULT_SYSTEM_ENABLE        (1)
 #define DEFAULT_MODBUS_BAUD_INDEX    (3)
 
+/* Enable persistence of service hours on each full hour change.
+ * Keep disabled for now to avoid frequent NVS writes.
+ */
+#define ENABLE_SERVICE_HOURS_PERSIST (0)
+
 /* TEMP DEBUG: speed up service runtime accumulation only in debug builds.
  * 60x means 1 real minute equals 1 service hour.
  */
@@ -56,6 +61,9 @@ static uint16_t s_service_hours_base = 0;
 static int64_t s_service_hours_base_us = 0;
 static uint64_t s_service_hours_last_rtc_us = 0;
 static uint64_t s_service_hours_rtc_wrap_offset_us = 0;
+#if ENABLE_SERVICE_HOURS_PERSIST
+static uint16_t s_service_hours_last_saved = 0;
+#endif
 static TaskHandle_t s_update_task = NULL;
 
 uint16_t System_Config_get_service_hours(void);
@@ -169,6 +177,9 @@ static void load_persisted(system_config_t *cfg)
 		cfg->modbus_addr = stored.modbus_addr;
 		cfg->modbus_baud = stored.modbus_baud;
 		s_service_hours_base = stored.service_hours;
+#if ENABLE_SERVICE_HOURS_PERSIST
+		s_service_hours_last_saved = stored.service_hours;
+#endif
 	}
 	nvs_close(handle);
 }
@@ -200,6 +211,36 @@ static void save_persisted(const system_config_t *cfg)
 	(void)nvs_commit(handle);
 	nvs_close(handle);
 }
+
+#if ENABLE_SERVICE_HOURS_PERSIST
+static void save_persisted_with_service_hours(const system_config_t *cfg, uint16_t service_hours)
+{
+	nvs_handle_t handle;
+	if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+		return;
+	}
+	persisted_config_t stored = {
+		.mode = cfg->mode,
+		.temp_desired = cfg->temp_desired,
+		.temp_threshold = cfg->temp_threshold,
+		.temp_alarm = cfg->temp_alarm,
+		.humidity_desired = cfg->humidity_desired,
+		.humidity_threshold = cfg->humidity_threshold,
+		.humidity_alarm = cfg->humidity_alarm,
+		.fan_manual_percent = cfg->fan_manual_percent,
+		.fan_min_percent = cfg->fan_min_percent,
+		.filter_limit_hours = cfg->filter_limit_hours,
+		.system_enable = cfg->system_enable,
+		.smoke_enable = cfg->smoke_enable,
+		.modbus_addr = cfg->modbus_addr,
+		.modbus_baud = cfg->modbus_baud,
+		.service_hours = service_hours,
+	};
+	(void)nvs_set_blob(handle, NVS_KEY_CFG, &stored, sizeof(stored));
+	(void)nvs_commit(handle);
+	nvs_close(handle);
+}
+#endif
 
 static void notify_update_task(void)
 {
@@ -267,6 +308,9 @@ void System_Config_init(void)
 		defaults.filter_limit_hours = DEFAULT_FILTER_LIMIT_HOURS;
 	}
 	s_service_hours_base_us = (int64_t)get_rtc_monotonic_us();
+#if ENABLE_SERVICE_HOURS_PERSIST
+	s_service_hours_last_saved = s_service_hours_base;
+#endif
 	s_alarm_clr = 0;
 	set_config_ex(&defaults, SYSTEM_CONFIG_SOURCE_INTERNAL, false);
 }
@@ -384,6 +428,27 @@ uint32_t System_Config_get_service_seconds(void)
 	if (total_seconds > max_seconds) {
 		total_seconds = max_seconds;
 	}
+
+#if ENABLE_SERVICE_HOURS_PERSIST
+	{
+		uint16_t total_hours = (uint16_t)(total_seconds / 3600ULL);
+		if (total_hours > 10000U) {
+			total_hours = 10000U;
+		}
+		bool do_save = false;
+		system_config_t snapshot;
+		portENTER_CRITICAL(&s_cfg_lock);
+		if (total_hours != s_service_hours_last_saved) {
+			s_service_hours_last_saved = total_hours;
+			snapshot = s_cfg;
+			do_save = true;
+		}
+		portEXIT_CRITICAL(&s_cfg_lock);
+		if (do_save) {
+			save_persisted_with_service_hours(&snapshot, total_hours);
+		}
+	}
+#endif
 
 	return (uint32_t)total_seconds;
 }
