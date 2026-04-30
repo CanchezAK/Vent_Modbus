@@ -8,6 +8,8 @@
 
 /* TEMPORARY: disable smoke alarm path until smoke sensor is physically installed */
 #define TEMP_DISABLE_SMOKE_ALARM     (1U)
+/* TEMPORARY: disable fan alarm path */
+#define TEMP_DISABLE_FAN_ALARM       (1U)
 
 static uint8_t compute_auto_channel_percent(uint16_t current_value,
 										uint16_t desired_value,
@@ -142,6 +144,10 @@ void Logic_step(logic_state_t *state,
 		state->alarm_smoke_latched = false;
 	}
 
+#if TEMP_DISABLE_FAN_ALARM
+	state->alarm_fan_latched = false;
+#endif
+
 	bool temp_alarm_active = false;
 	bool hum_alarm_active = false;
 	uint8_t fan_percent = 0;
@@ -191,9 +197,12 @@ void Logic_step(logic_state_t *state,
 	if (smoke_enabled && input->smoke_state) {
 		state->alarm_smoke_latched = true;
 	}
+
+#if !TEMP_DISABLE_FAN_ALARM
 	if (input->fan_alarm) {
 		state->alarm_fan_latched = true;
 	}
+#endif
 	if (input->filter_alarm) {
 		state->alarm_filter_latched = true;
 	}
@@ -211,9 +220,14 @@ void Logic_step(logic_state_t *state,
 		if (!(smoke_enabled && input->smoke_state)) {
 			state->alarm_smoke_latched = false;
 		}
+
+#if !TEMP_DISABLE_FAN_ALARM
 		if (!input->fan_alarm) {
 			state->alarm_fan_latched = false;
 		}
+#else
+		state->alarm_fan_latched = false;
+#endif
 		if (!input->filter_alarm) {
 			state->alarm_filter_latched = false;
 		}
@@ -223,9 +237,12 @@ void Logic_step(logic_state_t *state,
 	if (smoke_enabled && input->smoke_state) {
 		fan_percent = 100;
 	}
+
+#if !TEMP_DISABLE_FAN_ALARM
 	if (input->fan_alarm) {
 		fan_percent = 0;
 	}
+#endif
 
 	output->fan_percent = fan_percent;
 	output->alarm_temp = state->alarm_temp_latched;
