@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifndef ENABLE_SERVICE_ALARM_TOGGLES
+#define ENABLE_SERVICE_ALARM_TOGGLES 1
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

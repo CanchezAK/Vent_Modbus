@@ -43,6 +43,12 @@ typedef struct _objects_t {
     lv_obj_t *service_hours_label;
     lv_obj_t *service_filter_limit_slider;
     lv_obj_t *clear_filter_button;
+    lv_obj_t *service_alarm_temp_button;
+    lv_obj_t *service_alarm_humidity_button;
+    lv_obj_t *service_alarm_smoke_button;
+    lv_obj_t *service_alarm_fan_button;
+    lv_obj_t *service_alarm_filter_button;
+    lv_obj_t *service_telemetry_button;
     lv_obj_t *main_page_button;
 } objects_t;
 

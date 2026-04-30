@@ -8,6 +8,7 @@
 #include "System_Config.h"
 #include "Modbus_RTU.h"
 #include "Peripherials.h"
+#include "Logic.h"
 
 static int64_t s_last_screen_switch_us = 0;
 static int32_t s_modbus_addr = 1;
@@ -358,6 +359,58 @@ void set_var_manual_power_bool(bool value)
 	}
 	System_Config_set_from_display_volatile(&cfg);
 }
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+bool get_var_alarm_temp_enabled(void)
+{
+	return Logic_get_alarm_temp_enabled();
+}
+
+void set_var_alarm_temp_enabled(bool value)
+{
+	Logic_set_alarm_temp_enabled(value);
+}
+
+bool get_var_alarm_humidity_enabled(void)
+{
+	return Logic_get_alarm_humidity_enabled();
+}
+
+void set_var_alarm_humidity_enabled(bool value)
+{
+	Logic_set_alarm_humidity_enabled(value);
+}
+
+bool get_var_alarm_smoke_enabled(void)
+{
+	return Logic_get_alarm_smoke_enabled();
+}
+
+void set_var_alarm_smoke_enabled(bool value)
+{
+	Logic_set_alarm_smoke_enabled(value);
+}
+
+bool get_var_alarm_fan_enabled(void)
+{
+	return Logic_get_alarm_fan_enabled();
+}
+
+void set_var_alarm_fan_enabled(bool value)
+{
+	Logic_set_alarm_fan_enabled(value);
+}
+
+bool get_var_alarm_filter_enabled(void)
+{
+	return Logic_get_alarm_filter_enabled();
+}
+
+void set_var_alarm_filter_enabled(bool value)
+{
+	Logic_set_alarm_filter_enabled(value);
+}
+#endif
 
 int32_t get_var_tmp_fan_percent(void)
 {

@@ -39,3 +39,16 @@ void Logic_step(logic_state_t *state,
 				uint16_t alarm_clr,
 				const logic_input_t *input,
 				logic_output_t *output);
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+bool Logic_get_alarm_temp_enabled(void);
+void Logic_set_alarm_temp_enabled(bool enabled);
+bool Logic_get_alarm_humidity_enabled(void);
+void Logic_set_alarm_humidity_enabled(bool enabled);
+bool Logic_get_alarm_smoke_enabled(void);
+void Logic_set_alarm_smoke_enabled(bool enabled);
+bool Logic_get_alarm_fan_enabled(void);
+void Logic_set_alarm_fan_enabled(bool enabled);
+bool Logic_get_alarm_filter_enabled(void);
+void Logic_set_alarm_filter_enabled(bool enabled);
+#endif

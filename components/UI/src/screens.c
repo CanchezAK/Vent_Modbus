@@ -9,6 +9,7 @@
 #include "vars.h"
 #include "styles.h"
 #include "ui.h"
+#include "System_Config.h"
 
 #include <string.h>
 
@@ -16,6 +17,9 @@ objects_t objects;
 lv_obj_t *tick_value_change_obj;
 uint32_t active_theme_index = 0;
 static lv_obj_t *s_tmp_debug_label = NULL; // TEMPORARY DEBUG SECTION
+static bool s_tmp_debug_enabled = true;
+
+static void set_button_text(lv_obj_t *button, const char *text);
 
 static void event_handler_cb_settings_set_start_temp_arc(lv_event_t *e) {
     lv_event_code_t event = lv_event_get_code(e);
@@ -84,6 +88,67 @@ static void event_handler_cb_service_alarm_clr(lv_event_t *e) {
         action_clear_alarms(e);
     }
 }
+
+static void apply_debug_label_visibility(void) {
+    if (!s_tmp_debug_label) {
+        return;
+    }
+    if (s_tmp_debug_enabled) {
+        lv_obj_clear_flag(s_tmp_debug_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_tmp_debug_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void event_handler_cb_service_telemetry_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        s_tmp_debug_enabled = !s_tmp_debug_enabled;
+        apply_debug_label_visibility();
+        set_button_text(objects.service_telemetry_button, s_tmp_debug_enabled ? "TEL:1" : "TEL:0");
+    }
+}
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+static void event_handler_cb_service_alarm_temp_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_alarm_temp_enabled();
+        set_var_alarm_temp_enabled(new_value);
+        set_button_text(objects.service_alarm_temp_button, new_value ? "TEMP:1" : "TEMP:0");
+    }
+}
+
+static void event_handler_cb_service_alarm_humidity_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_alarm_humidity_enabled();
+        set_var_alarm_humidity_enabled(new_value);
+        set_button_text(objects.service_alarm_humidity_button, new_value ? "HUM:1" : "HUM:0");
+    }
+}
+
+static void event_handler_cb_service_alarm_smoke_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_alarm_smoke_enabled();
+        set_var_alarm_smoke_enabled(new_value);
+        set_button_text(objects.service_alarm_smoke_button, new_value ? "SMOKE:1" : "SMOKE:0");
+    }
+}
+
+static void event_handler_cb_service_alarm_fan_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_alarm_fan_enabled();
+        set_var_alarm_fan_enabled(new_value);
+        set_button_text(objects.service_alarm_fan_button, new_value ? "FAN:1" : "FAN:0");
+    }
+}
+
+static void event_handler_cb_service_alarm_filter_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_alarm_filter_enabled();
+        set_var_alarm_filter_enabled(new_value);
+        set_button_text(objects.service_alarm_filter_button, new_value ? "FILTER:1" : "FILTER:0");
+    }
+}
+#endif
 
 static void event_handler_cb_service_main_page(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
@@ -398,6 +463,7 @@ void create_screen_main() {
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_text_font(obj, &ui_font_roboto14, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_label_set_text(obj, "[TEMP DEBUG]\ninit...");
+            apply_debug_label_visibility();
         }
     }
     
@@ -528,7 +594,7 @@ void tick_screen_main() {
         int32_t mb_baud_req = get_var_tmp_mb_baud_req();
         int32_t mb_baud_act = get_var_tmp_mb_baud_act();
 
-        if (s_tmp_debug_label &&
+        if (s_tmp_debug_enabled && s_tmp_debug_label &&
             (fan_percent != last_tmp_fan_percent ||
              mode_bits != last_tmp_mode_bits ||
              manual != last_tmp_manual ||
@@ -1218,6 +1284,122 @@ void create_screen_service() {
                 }
             }
         }
+#if ENABLE_SERVICE_ALARM_TOGGLES
+        {
+            // service_alarm_temp_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_alarm_temp_button = obj;
+            lv_obj_set_pos(obj, 1100, 80);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_alarm_temp_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, get_var_alarm_temp_enabled() ? "TEMP:1" : "TEMP:0");
+                }
+            }
+        }
+        {
+            // service_alarm_humidity_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_alarm_humidity_button = obj;
+            lv_obj_set_pos(obj, 1100, 144);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_alarm_humidity_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, get_var_alarm_humidity_enabled() ? "HUM:1" : "HUM:0");
+                }
+            }
+        }
+        {
+            // service_alarm_smoke_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_alarm_smoke_button = obj;
+            lv_obj_set_pos(obj, 1100, 208);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_alarm_smoke_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, get_var_alarm_smoke_enabled() ? "SMOKE:1" : "SMOKE:0");
+                }
+            }
+        }
+        {
+            // service_alarm_fan_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_alarm_fan_button = obj;
+            lv_obj_set_pos(obj, 1100, 272);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_alarm_fan_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, get_var_alarm_fan_enabled() ? "FAN:1" : "FAN:0");
+                }
+            }
+        }
+        {
+            // service_alarm_filter_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_alarm_filter_button = obj;
+            lv_obj_set_pos(obj, 1100, 336);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_alarm_filter_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, get_var_alarm_filter_enabled() ? "FILTER:1" : "FILTER:0");
+                }
+            }
+        }
+#endif
+        {
+            // service_telemetry_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.service_telemetry_button = obj;
+            lv_obj_set_pos(obj, 1100, 400);
+            lv_obj_set_size(obj, 160, 56);
+            lv_obj_add_event_cb(obj, event_handler_cb_service_telemetry_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto24, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, s_tmp_debug_enabled ? "TEL:1" : "TEL:0");
+                }
+            }
+        }
         {
             // main_page_button
             lv_obj_t *obj = lv_btn_create(parent_obj);
@@ -1244,6 +1426,14 @@ void create_screen_service() {
 
 void tick_screen_service() {
     static int32_t last_filter_limit = INT32_MIN;
+#if ENABLE_SERVICE_ALARM_TOGGLES
+    static int32_t last_alarm_temp_enabled = -1;
+    static int32_t last_alarm_humidity_enabled = -1;
+    static int32_t last_alarm_smoke_enabled = -1;
+    static int32_t last_alarm_fan_enabled = -1;
+    static int32_t last_alarm_filter_enabled = -1;
+#endif
+    static int32_t last_telemetry_enabled = -1;
     {
         int32_t new_val = action_get_filter_limit_hours();
         int32_t cur_val = lv_slider_get_value(objects.service_filter_limit_slider);
@@ -1257,6 +1447,50 @@ void tick_screen_service() {
             lv_label_set_text_fmt(objects.service_hours_label, "%ldЧ.", (long)new_val);
             tick_value_change_obj = NULL;
             last_filter_limit = new_val;
+        }
+    }
+#if ENABLE_SERVICE_ALARM_TOGGLES
+    {
+        int32_t new_val = get_var_alarm_temp_enabled() ? 1 : 0;
+        if (new_val != last_alarm_temp_enabled) {
+            set_button_text(objects.service_alarm_temp_button, new_val ? "TEMP:1" : "TEMP:0");
+            last_alarm_temp_enabled = new_val;
+        }
+    }
+    {
+        int32_t new_val = get_var_alarm_humidity_enabled() ? 1 : 0;
+        if (new_val != last_alarm_humidity_enabled) {
+            set_button_text(objects.service_alarm_humidity_button, new_val ? "HUM:1" : "HUM:0");
+            last_alarm_humidity_enabled = new_val;
+        }
+    }
+    {
+        int32_t new_val = get_var_alarm_smoke_enabled() ? 1 : 0;
+        if (new_val != last_alarm_smoke_enabled) {
+            set_button_text(objects.service_alarm_smoke_button, new_val ? "SMOKE:1" : "SMOKE:0");
+            last_alarm_smoke_enabled = new_val;
+        }
+    }
+    {
+        int32_t new_val = get_var_alarm_fan_enabled() ? 1 : 0;
+        if (new_val != last_alarm_fan_enabled) {
+            set_button_text(objects.service_alarm_fan_button, new_val ? "FAN:1" : "FAN:0");
+            last_alarm_fan_enabled = new_val;
+        }
+    }
+    {
+        int32_t new_val = get_var_alarm_filter_enabled() ? 1 : 0;
+        if (new_val != last_alarm_filter_enabled) {
+            set_button_text(objects.service_alarm_filter_button, new_val ? "FILTER:1" : "FILTER:0");
+            last_alarm_filter_enabled = new_val;
+        }
+    }
+#endif
+    {
+        int32_t new_val = s_tmp_debug_enabled ? 1 : 0;
+        if (new_val != last_telemetry_enabled) {
+            set_button_text(objects.service_telemetry_button, new_val ? "TEL:1" : "TEL:0");
+            last_telemetry_enabled = new_val;
         }
     }
 }

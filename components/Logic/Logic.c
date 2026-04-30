@@ -7,9 +7,28 @@
 #define AUTO_ALARM_DELTA             (10U)
 
 /* TEMPORARY: disable smoke alarm path until smoke sensor is physically installed */
-#define TEMP_DISABLE_SMOKE_ALARM     (1U)
+#define TEMP_DISABLE_SMOKE_ALARM     (0U)
 /* TEMPORARY: disable fan alarm path */
-#define TEMP_DISABLE_FAN_ALARM       (1U)
+#define TEMP_DISABLE_FAN_ALARM       (0U)
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+static bool s_alarm_enable_temp = true;
+static bool s_alarm_enable_humidity = true;
+static bool s_alarm_enable_smoke = true;
+static bool s_alarm_enable_fan = true;
+static bool s_alarm_enable_filter = true;
+
+bool Logic_get_alarm_temp_enabled(void) { return s_alarm_enable_temp; }
+void Logic_set_alarm_temp_enabled(bool enabled) { s_alarm_enable_temp = enabled; }
+bool Logic_get_alarm_humidity_enabled(void) { return s_alarm_enable_humidity; }
+void Logic_set_alarm_humidity_enabled(bool enabled) { s_alarm_enable_humidity = enabled; }
+bool Logic_get_alarm_smoke_enabled(void) { return s_alarm_enable_smoke; }
+void Logic_set_alarm_smoke_enabled(bool enabled) { s_alarm_enable_smoke = enabled; }
+bool Logic_get_alarm_fan_enabled(void) { return s_alarm_enable_fan; }
+void Logic_set_alarm_fan_enabled(bool enabled) { s_alarm_enable_fan = enabled; }
+bool Logic_get_alarm_filter_enabled(void) { return s_alarm_enable_filter; }
+void Logic_set_alarm_filter_enabled(bool enabled) { s_alarm_enable_filter = enabled; }
+#endif
 
 static uint8_t compute_auto_channel_percent(uint16_t current_value,
 										uint16_t desired_value,
@@ -136,7 +155,20 @@ void Logic_step(logic_state_t *state,
 		return;
 	}
 
-	bool smoke_enabled = cfg->smoke_enable != 0;
+	bool temp_alarm_enabled = true;
+	bool hum_alarm_enabled = true;
+	bool smoke_alarm_enabled = true;
+	bool fan_alarm_enabled = true;
+	bool filter_alarm_enabled = true;
+#if ENABLE_SERVICE_ALARM_TOGGLES
+	temp_alarm_enabled = s_alarm_enable_temp;
+	hum_alarm_enabled = s_alarm_enable_humidity;
+	smoke_alarm_enabled = s_alarm_enable_smoke;
+	fan_alarm_enabled = s_alarm_enable_fan;
+	filter_alarm_enabled = s_alarm_enable_filter;
+#endif
+
+	bool smoke_enabled = smoke_alarm_enabled;
 #if TEMP_DISABLE_SMOKE_ALARM
 	smoke_enabled = false;
 #endif
@@ -144,9 +176,21 @@ void Logic_step(logic_state_t *state,
 		state->alarm_smoke_latched = false;
 	}
 
+	if (!fan_alarm_enabled) {
+		state->alarm_fan_latched = false;
+	}
+	if (!filter_alarm_enabled) {
+		state->alarm_filter_latched = false;
+	}
 #if TEMP_DISABLE_FAN_ALARM
 	state->alarm_fan_latched = false;
 #endif
+	if (!temp_alarm_enabled) {
+		state->alarm_temp_latched = false;
+	}
+	if (!hum_alarm_enabled) {
+		state->alarm_humidity_latched = false;
+	}
 
 	bool temp_alarm_active = false;
 	bool hum_alarm_active = false;
@@ -187,23 +231,31 @@ void Logic_step(logic_state_t *state,
 
 		fan_percent = (temp_percent > hum_percent) ? temp_percent : hum_percent;
 	}
+	if (!temp_alarm_enabled) {
+		temp_alarm_active = false;
+	}
+	if (!hum_alarm_enabled) {
+		hum_alarm_active = false;
+	}
 
-	if (temp_alarm_active) {
+	if (temp_alarm_enabled && temp_alarm_active) {
 		state->alarm_temp_latched = true;
 	}
-	if (hum_alarm_active) {
+	if (hum_alarm_enabled && hum_alarm_active) {
 		state->alarm_humidity_latched = true;
 	}
 	if (smoke_enabled && input->smoke_state) {
 		state->alarm_smoke_latched = true;
 	}
 
+	if (fan_alarm_enabled) {
 #if !TEMP_DISABLE_FAN_ALARM
-	if (input->fan_alarm) {
-		state->alarm_fan_latched = true;
-	}
+		if (input->fan_alarm) {
+			state->alarm_fan_latched = true;
+		}
 #endif
-	if (input->filter_alarm) {
+	}
+	if (filter_alarm_enabled && input->filter_alarm) {
 		state->alarm_filter_latched = true;
 	}
 
@@ -211,24 +263,28 @@ void Logic_step(logic_state_t *state,
 	state->last_alarm_clr = alarm_clr;
 
 	if (clear_request) {
-		if (!temp_alarm_active) {
+		if (!temp_alarm_active || !temp_alarm_enabled) {
 			state->alarm_temp_latched = false;
 		}
-		if (!hum_alarm_active) {
+		if (!hum_alarm_active || !hum_alarm_enabled) {
 			state->alarm_humidity_latched = false;
 		}
 		if (!(smoke_enabled && input->smoke_state)) {
 			state->alarm_smoke_latched = false;
 		}
 
-#if !TEMP_DISABLE_FAN_ALARM
-		if (!input->fan_alarm) {
+		if (!fan_alarm_enabled) {
 			state->alarm_fan_latched = false;
-		}
+		} else {
+#if !TEMP_DISABLE_FAN_ALARM
+			if (!input->fan_alarm) {
+				state->alarm_fan_latched = false;
+			}
 #else
-		state->alarm_fan_latched = false;
+			state->alarm_fan_latched = false;
 #endif
-		if (!input->filter_alarm) {
+		}
+		if (!filter_alarm_enabled || !input->filter_alarm) {
 			state->alarm_filter_latched = false;
 		}
 	}
@@ -238,18 +294,20 @@ void Logic_step(logic_state_t *state,
 		fan_percent = 100;
 	}
 
+	if (fan_alarm_enabled) {
 #if !TEMP_DISABLE_FAN_ALARM
-	if (input->fan_alarm) {
-		fan_percent = 0;
-	}
+		if (input->fan_alarm) {
+			fan_percent = 0;
+		}
 #endif
+	}
 
 	output->fan_percent = fan_percent;
-	output->alarm_temp = state->alarm_temp_latched;
-	output->alarm_humidity = state->alarm_humidity_latched;
-	output->alarm_smoke = state->alarm_smoke_latched;
-	output->alarm_fan = state->alarm_fan_latched;
-	output->alarm_filter = state->alarm_filter_latched;
+	output->alarm_temp = temp_alarm_enabled ? state->alarm_temp_latched : false;
+	output->alarm_humidity = hum_alarm_enabled ? state->alarm_humidity_latched : false;
+	output->alarm_smoke = smoke_alarm_enabled ? state->alarm_smoke_latched : false;
+	output->alarm_fan = fan_alarm_enabled ? state->alarm_fan_latched : false;
+	output->alarm_filter = filter_alarm_enabled ? state->alarm_filter_latched : false;
 
 	(void)any_alarm;
 }

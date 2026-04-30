@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "System_Config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +59,19 @@ extern bool get_var_autostart_humidity_bool();
 extern void set_var_autostart_humidity_bool(bool value);
 extern bool get_var_manual_power_bool();
 extern void set_var_manual_power_bool(bool value);
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+extern bool get_var_alarm_temp_enabled(void);
+extern void set_var_alarm_temp_enabled(bool value);
+extern bool get_var_alarm_humidity_enabled(void);
+extern void set_var_alarm_humidity_enabled(bool value);
+extern bool get_var_alarm_smoke_enabled(void);
+extern void set_var_alarm_smoke_enabled(bool value);
+extern bool get_var_alarm_fan_enabled(void);
+extern void set_var_alarm_fan_enabled(bool value);
+extern bool get_var_alarm_filter_enabled(void);
+extern void set_var_alarm_filter_enabled(bool value);
+#endif
 
 // TEMPORARY DEBUG HELPERS
 extern int32_t get_var_tmp_fan_percent();
