@@ -746,37 +746,42 @@ void create_screen_settings() {
         }
         {
             lv_obj_t *obj = lv_obj_create(parent_obj);
-            lv_obj_set_pos(obj, 51, 586);
+            lv_obj_set_pos(obj, 51, 574);
             lv_obj_set_size(obj, 257, 86);
-        }
-        {
-            // door_led_settings
-            lv_obj_t *obj = lv_led_create(parent_obj);
-            objects.door_led_settings = obj;
-            lv_obj_set_pos(obj, 252, 617);
-            lv_obj_set_size(obj, 24, 24);
-            lv_led_set_color(obj, lv_color_hex(0xff0000ff));
-        }
-        {
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            lv_obj_set_pos(obj, 92, 608);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text(obj, "ДВЕРЬ");
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 0, 0);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, "ДВЕРЬ");
+                }
+                {
+                    // door_led_settings
+                    lv_obj_t *obj = lv_led_create(parent_obj);
+                    objects.door_led_settings = obj;
+                    lv_obj_set_pos(obj, 214, 31);
+                    lv_obj_set_size(obj, 24, 24);
+                    lv_led_set_color(obj, lv_color_hex(0xff0000ff));
+                }
+            }
         }
         {
             // smoke_settings_button
             lv_obj_t *obj = lv_btn_create(parent_obj);
             objects.smoke_settings_button = obj;
-            lv_obj_set_pos(obj, 358, 586);
+            lv_obj_set_pos(obj, 358, 574);
             lv_obj_set_size(obj, 257, 86);
             lv_obj_add_event_cb(obj, event_handler_cb_settings_smoke_button, LV_EVENT_CLICKED, 0);
             {
                 lv_obj_t *parent_obj = obj;
                 {
                     lv_obj_t *obj = lv_label_create(parent_obj);
-                    lv_obj_set_pos(obj, 59, 22);
+                    lv_obj_set_pos(obj, 0, 0);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_label_set_text(obj, "ДЫМ");
                 }
@@ -784,7 +789,7 @@ void create_screen_settings() {
                     // smoke_led_settings
                     lv_obj_t *obj = lv_led_create(parent_obj);
                     objects.smoke_led_settings = obj;
-                    lv_obj_set_pos(obj, 196, 31);
+                    lv_obj_set_pos(obj, 214, 31);
                     lv_obj_set_size(obj, 24, 24);
                     lv_led_set_color(obj, lv_color_hex(0xffff0044));
                 }
