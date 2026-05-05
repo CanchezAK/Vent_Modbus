@@ -13,7 +13,6 @@
 
 
 
-
 #if defined(EEZ_FOR_LVGL)
 
 void ui_init() {
@@ -22,7 +21,7 @@ void ui_init() {
 
 void ui_tick() {
     eez_flow_tick();
-    tick_screen(g_currentScreen);
+    tick_all_screens();
 }
 
 #else
@@ -51,7 +50,8 @@ void ui_init() {
 }
 
 void ui_tick() {
-    tick_screen(currentScreen);
+    (void)currentScreen;
+    tick_all_screens();
 }
 
 #endif

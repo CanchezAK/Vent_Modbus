@@ -46,6 +46,10 @@ system_config_t System_Config_get_snapshot(system_config_source_t *source, uint3
 uint16_t System_Config_get_alarm_clr(void);
 void System_Config_set_alarm_clr(system_config_source_t source, uint16_t value);
 
+bool System_Config_get_smoke_temp_only_stop_enabled(void);
+void System_Config_set_smoke_temp_only_stop_enabled_volatile(bool enabled);
+void System_Config_set_smoke_temp_only_stop_enabled_persist(bool enabled);
+
 uint16_t System_Config_get_service_hours(void);
 uint32_t System_Config_get_service_seconds(void);
 void System_Config_set_service_hours(uint16_t value);

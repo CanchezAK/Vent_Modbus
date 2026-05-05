@@ -14,6 +14,7 @@ void Peripherials_init_dsi(void);
 void Peripherials_set_fan(uint8_t percent);
 void Peripherials_set_buzzer(bool enabled);
 uint8_t Peripherials_get_fan_percent(void);
+bool Peripherials_get_fan_output_present_state(void);
 bool Peripherials_get_door_state(void);
 bool Peripherials_get_smoke_state(void);
 bool Peripherials_get_fan_alarm_state(void);

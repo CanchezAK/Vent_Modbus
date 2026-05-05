@@ -25,6 +25,7 @@ typedef struct _objects_t {
     lv_obj_t *temp_label_settings;
     lv_obj_t *humidity_label_settings;
     lv_obj_t *door_led_settings;
+    lv_obj_t *smoke_settings_button;
     lv_obj_t *smoke_led_settings;
     lv_obj_t *set_start_temp_arc;
     lv_obj_t *set_start_humidity_arc;
@@ -75,6 +76,7 @@ void tick_screen_service();
 
 void tick_screen_by_id(enum ScreensEnum screenId);
 void tick_screen(int screen_index);
+void tick_all_screens();
 
 void create_screens();
 

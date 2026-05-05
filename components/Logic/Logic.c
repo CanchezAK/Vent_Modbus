@@ -199,6 +199,8 @@ void Logic_step(logic_state_t *state,
 	bool manual_enabled = (mode_flags & MODE_MANUAL_BIT) != 0;
 	bool auto_temp_enabled = (mode_flags & MODE_AUTOSTART_TEMP_BIT) != 0;
 	bool auto_humidity_enabled = (mode_flags & MODE_AUTOSTART_HUMIDITY_BIT) != 0;
+	bool temp_only_mode = !manual_enabled && auto_temp_enabled && !auto_humidity_enabled;
+	bool smoke_temp_only_stop_enabled = System_Config_get_smoke_temp_only_stop_enabled();
 	uint8_t manual_percent = Logic_clamp_percent(cfg->fan_manual_percent);
 	/*
 	 * Single source of truth for fan setpoint from UI/Modbus:
@@ -207,12 +209,25 @@ void Logic_step(logic_state_t *state,
 	uint8_t min_percent = manual_percent;
 
 	if (manual_enabled) {
-		fan_percent = manual_percent;
+		if (!input->door_open) {
+			state->door_boost_active = false;
+			state->door_boost_base = manual_percent;
+			fan_percent = manual_percent;
+		} else {
+			if (!state->door_boost_active) {
+				state->door_boost_active = true;
+				state->door_boost_base = manual_percent;
+			}
+			uint16_t boosted = (uint16_t)state->door_boost_base * 2U;
+			fan_percent = (boosted > 100U) ? 100U : (uint8_t)boosted;
+		}
 		uint32_t temp_alarm_value = (uint32_t)cfg->temp_desired + AUTO_ALARM_DELTA;
 		uint32_t hum_alarm_value = (uint32_t)cfg->humidity_desired + AUTO_ALARM_DELTA;
 		temp_alarm_active = (uint32_t)input->current_temp >= temp_alarm_value;
 		hum_alarm_active = (uint32_t)input->current_humidity >= hum_alarm_value;
 	} else {
+		state->door_boost_active = false;
+		state->door_boost_base = manual_percent;
 		uint8_t temp_percent = 0;
 		uint8_t hum_percent = 0;
 
@@ -290,8 +305,12 @@ void Logic_step(logic_state_t *state,
 	}
 
 	bool any_alarm = state->alarm_temp_latched || state->alarm_humidity_latched || state->alarm_smoke_latched;
-	if (smoke_enabled && input->smoke_state) {
+	if ((temp_alarm_enabled && state->alarm_temp_latched) ||
+		(hum_alarm_enabled && state->alarm_humidity_latched)) {
 		fan_percent = 100;
+	}
+	if (smoke_enabled && state->alarm_smoke_latched) {
+		fan_percent = (temp_only_mode && smoke_temp_only_stop_enabled) ? 0 : 100;
 	}
 
 	if (fan_alarm_enabled) {

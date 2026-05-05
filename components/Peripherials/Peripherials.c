@@ -22,10 +22,14 @@
 #define SMOKE_SENSOR_GPIO    (GPIO_NUM_45)
 #define DOOR_DEBOUNCE_US     (50000)
 #define FAN_ALARM_DEBOUNCE_US (1000000)
+#define ZERO_CROSS_RETRIGGER_GUARD_US (2500)
+#define MIN_VALID_AC_HALF_CYCLE_US    (1000)
+#define FAN_EFFECTIVE_MIN_PERCENT     (48U)
+#define FAN_EFFECTIVE_FULL_PERCENT    (92U)
 
 #define DEFAULT_AC_HALF_CYCLE_US     (10000)
 #define DEFAULT_TRIAC_PULSE_US       (100)
-#define DEFAULT_TRIAC_MIN_DELAY_US   (200)
+#define DEFAULT_TRIAC_MIN_DELAY_US   (20)
 
 #define I2C_DISPLAY_SDA_GPIO  (GPIO_NUM_7)
 #define I2C_DISPLAY_SCL_GPIO  (GPIO_NUM_8)
@@ -46,7 +50,8 @@
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
 i2c_master_bus_handle_t i2c_bus_sensors_handle = NULL;
 esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
-static esp_timer_handle_t fan1_timer = NULL;
+static esp_timer_handle_t fan1_fire_timer = NULL;
+static esp_timer_handle_t fan1_gate_off_timer = NULL;
 static TaskHandle_t zero_cross_task_handle = NULL;
 static volatile uint8_t fan1_percent = 0;
 static uint32_t s_ac_half_cycle_us = DEFAULT_AC_HALF_CYCLE_US;
@@ -60,31 +65,119 @@ static esp_ldo_channel_handle_t s_mipi_phy_ldo = NULL;
 static bool s_fan_alarm_state = false;
 static int64_t s_fan_alarm_mismatch_since_us = 0;
 static int64_t s_fan_alarm_match_since_us = 0;
+static volatile int64_t s_last_zero_cross_us = 0;
 
 static const char *TAG = "Peripherials";
 
-static uint32_t phase_delay_from_percent(uint8_t percent)
+static uint32_t triac_pulse_width_us(void)
 {
-	if (percent >= 100) {
-		return s_triac_min_delay_us;
+	uint32_t half_cycle_us = s_ac_half_cycle_us;
+	if (half_cycle_us < MIN_VALID_AC_HALF_CYCLE_US) {
+		half_cycle_us = DEFAULT_AC_HALF_CYCLE_US;
 	}
-	uint32_t max_delay = s_ac_half_cycle_us - s_triac_pulse_us;
-	uint32_t range = max_delay - s_triac_min_delay_us;
-	uint32_t scaled = (range * (100 - percent)) / 100;
-	return s_triac_min_delay_us + scaled;
+
+	uint32_t pulse_us = s_triac_pulse_us;
+	if (pulse_us == 0) {
+		pulse_us = DEFAULT_TRIAC_PULSE_US;
+	}
+	if (pulse_us >= half_cycle_us) {
+		pulse_us = half_cycle_us - 1U;
+	}
+
+	return pulse_us;
 }
 
-static void fan1_timer_cb(void *arg)
+static uint32_t raw_phase_delay_from_percent(uint8_t percent)
+{
+	uint32_t half_cycle_us = s_ac_half_cycle_us;
+	if (half_cycle_us < MIN_VALID_AC_HALF_CYCLE_US) {
+		half_cycle_us = DEFAULT_AC_HALF_CYCLE_US;
+	}
+
+	uint32_t pulse_us = triac_pulse_width_us();
+	uint32_t max_delay = half_cycle_us - pulse_us;
+	uint32_t min_delay_us = s_triac_min_delay_us;
+	if (min_delay_us > max_delay) {
+		min_delay_us = max_delay;
+	}
+
+	if (percent >= 100) {
+		return min_delay_us;
+	}
+	uint32_t range = max_delay - min_delay_us;
+	uint32_t scaled = (range * (100 - percent)) / 100;
+	return min_delay_us + scaled;
+}
+
+static uint32_t phase_delay_from_percent(uint8_t percent)
+{
+	if (percent == 0) {
+		return 0;
+	}
+	if (percent >= 100) {
+		return raw_phase_delay_from_percent(100);
+	}
+
+	uint32_t min_output_delay = raw_phase_delay_from_percent(FAN_EFFECTIVE_FULL_PERCENT);
+	uint32_t max_output_delay = raw_phase_delay_from_percent(FAN_EFFECTIVE_MIN_PERCENT);
+	if (max_output_delay <= min_output_delay) {
+		return min_output_delay;
+	}
+
+	uint32_t range = max_output_delay - min_output_delay;
+	uint32_t scaled = ((uint32_t)(percent - 1U) * range) / 98U;
+	return max_output_delay - scaled;
+}
+
+static void stop_phase_control_timers(void)
+{
+	if (fan1_fire_timer && esp_timer_is_active(fan1_fire_timer)) {
+		(void)esp_timer_stop(fan1_fire_timer);
+	}
+	if (fan1_gate_off_timer && esp_timer_is_active(fan1_gate_off_timer)) {
+		(void)esp_timer_stop(fan1_gate_off_timer);
+	}
+	gpio_set_level(FAN_COOLER_ONE_GPIO, 0);
+}
+
+static void fan1_gate_off_timer_cb(void *arg)
 {
 	(void)arg;
-	gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
-	esp_rom_delay_us(s_triac_pulse_us);
+	if (fan1_percent >= 100) {
+		gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
+		return;
+	}
 	gpio_set_level(FAN_COOLER_ONE_GPIO, 0);
+}
+
+static void fan1_fire_timer_cb(void *arg)
+{
+	(void)arg;
+	if (fan1_percent >= 100) {
+		gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
+		return;
+	}
+	if (fan1_percent == 0) {
+		gpio_set_level(FAN_COOLER_ONE_GPIO, 0);
+		return;
+	}
+	gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
+	if (!fan1_gate_off_timer ||
+		esp_timer_start_once(fan1_gate_off_timer, triac_pulse_width_us()) != ESP_OK) {
+		gpio_set_level(FAN_COOLER_ONE_GPIO, 0);
+	}
 }
 
 static void IRAM_ATTR zero_cross_isr(void *arg)
 {
 	(void)arg;
+	int64_t now_us = esp_timer_get_time();
+	if (s_last_zero_cross_us != 0 &&
+		(now_us - s_last_zero_cross_us) < ZERO_CROSS_RETRIGGER_GUARD_US) {
+		return;
+	}
+	s_last_zero_cross_us = now_us;
+
 	BaseType_t higher_priority = pdFALSE;
 	if (zero_cross_task_handle) {
 		vTaskNotifyGiveFromISR(zero_cross_task_handle, &higher_priority);
@@ -100,8 +193,13 @@ static void zero_cross_task(void *arg)
 	for (;;) {
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		uint8_t p1 = fan1_percent;
-		if (p1 > 0) {
-			esp_timer_start_once(fan1_timer, phase_delay_from_percent(p1));
+		stop_phase_control_timers();
+		if (p1 >= 100) {
+			gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
+			continue;
+		}
+		if (p1 > 0 && fan1_fire_timer) {
+			(void)esp_timer_start_once(fan1_fire_timer, phase_delay_from_percent(p1));
 		}
 	}
 }
@@ -125,7 +223,7 @@ static void init_gpio(void)
 		.mode = GPIO_MODE_INPUT,
 		.pull_up_en = GPIO_PULLUP_ENABLE,
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
-		.intr_type = GPIO_INTR_POSEDGE
+		.intr_type = GPIO_INTR_ANYEDGE
 	};
 	ESP_ERROR_CHECK(gpio_config(&zc_conf));
 	ESP_ERROR_CHECK(gpio_install_isr_service(0));
@@ -144,11 +242,16 @@ static void init_gpio(void)
 
 static void init_phase_control(void)
 {
-	esp_timer_create_args_t fan1_timer_args = {
-		.callback = fan1_timer_cb,
-		.name = "fan1_triac"
+	esp_timer_create_args_t fan1_fire_timer_args = {
+		.callback = fan1_fire_timer_cb,
+		.name = "fan1_fire"
 	};
-	ESP_ERROR_CHECK(esp_timer_create(&fan1_timer_args, &fan1_timer));
+	esp_timer_create_args_t fan1_gate_off_timer_args = {
+		.callback = fan1_gate_off_timer_cb,
+		.name = "fan1_gate_off"
+	};
+	ESP_ERROR_CHECK(esp_timer_create(&fan1_fire_timer_args, &fan1_fire_timer));
+	ESP_ERROR_CHECK(esp_timer_create(&fan1_gate_off_timer_args, &fan1_gate_off_timer));
 	xTaskCreate(zero_cross_task, "zero_cross_task", 2048, NULL, 12, &zero_cross_task_handle);
 }
 
@@ -236,12 +339,16 @@ void Peripherials_init(void)
 
 void Peripherials_set_fan(uint8_t percent)
 {
+	uint8_t prev_percent = fan1_percent;
 	if (percent > 100) {
 		percent = 100;
 	}
 	fan1_percent = percent;
-	if (percent == 0) {
-		gpio_set_level(FAN_COOLER_ONE_GPIO, 0);
+	if (percent >= 100) {
+		stop_phase_control_timers();
+		gpio_set_level(FAN_COOLER_ONE_GPIO, 1);
+	} else if (prev_percent >= 100 || percent == 0) {
+		stop_phase_control_timers();
 	}
 }
 
@@ -253,6 +360,11 @@ void Peripherials_set_buzzer(bool enabled)
 uint8_t Peripherials_get_fan_percent(void)
 {
 	return fan1_percent;
+}
+
+bool Peripherials_get_fan_output_present_state(void)
+{
+	return gpio_get_level(TRIAC_STATE_GPIO) == 0;
 }
 
 bool Peripherials_get_door_state(void)
@@ -279,12 +391,12 @@ bool Peripherials_get_door_state(void)
 
 bool Peripherials_get_smoke_state(void)
 {
-	return gpio_get_level(SMOKE_SENSOR_GPIO) != 0;
+	return gpio_get_level(SMOKE_SENSOR_GPIO) == 0;
 }
 
 bool Peripherials_get_fan_alarm_state(void)
 {
-	bool output_present = gpio_get_level(TRIAC_STATE_GPIO) != 0;
+	bool output_present = Peripherials_get_fan_output_present_state();
 	bool should_be_on = (fan1_percent > 0);
 	bool mismatch = (should_be_on != output_present);
 	int64_t now_us = esp_timer_get_time();

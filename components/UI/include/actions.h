@@ -16,6 +16,7 @@ void action_save_settings(lv_event_t *e);
 void action_save_modbus_and_reboot(lv_event_t *e);
 void action_clear_filter_hours(lv_event_t *e);
 void action_clear_alarms(lv_event_t *e);
+void action_save_smoke_temp_only_stop_setting(void);
 
 int32_t action_get_modbus_addr(void);
 void action_set_modbus_addr(int32_t addr);

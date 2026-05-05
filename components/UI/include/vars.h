@@ -28,7 +28,8 @@ enum FlowGlobalVariables {
     FLOW_GLOBAL_VARIABLE_VENT_POWER_VAR = 9,
     FLOW_GLOBAL_VARIABLE_AUTOSTART_TEMP_BOOL = 10,
     FLOW_GLOBAL_VARIABLE_AUTOSTART_HUMIDITY_BOOL = 11,
-    FLOW_GLOBAL_VARIABLE_MANUAL_POWER_BOOL = 12
+    FLOW_GLOBAL_VARIABLE_MANUAL_POWER_BOOL = 12,
+    FLOW_GLOBAL_VARIABLE_SMOKE_TEMP_ONLY_STOP_BOOL = 13
 };
 
 // Native global variables
@@ -59,6 +60,8 @@ extern bool get_var_autostart_humidity_bool();
 extern void set_var_autostart_humidity_bool(bool value);
 extern bool get_var_manual_power_bool();
 extern void set_var_manual_power_bool(bool value);
+extern bool get_var_smoke_temp_only_stop_bool();
+extern void set_var_smoke_temp_only_stop_bool(bool value);
 
 #if ENABLE_SERVICE_ALARM_TOGGLES
 extern bool get_var_alarm_temp_enabled(void);
@@ -75,6 +78,7 @@ extern void set_var_alarm_filter_enabled(bool value);
 
 // TEMPORARY DEBUG HELPERS
 extern int32_t get_var_tmp_fan_percent();
+extern int32_t get_var_tmp_fan_feedback();
 extern int32_t get_var_tmp_mode_bits();
 extern int32_t get_var_tmp_alarm_temp();
 extern int32_t get_var_tmp_alarm_humidity();

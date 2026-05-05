@@ -20,6 +20,7 @@ static lv_obj_t *s_tmp_debug_label = NULL; // TEMPORARY DEBUG SECTION
 static bool s_tmp_debug_enabled = true;
 
 static void set_button_text(lv_obj_t *button, const char *text);
+static void apply_smoke_settings_button_state(bool enabled);
 
 static void event_handler_cb_settings_set_start_temp_arc(lv_event_t *e) {
     lv_event_code_t event = lv_event_get_code(e);
@@ -235,6 +236,41 @@ static void event_handler_cb_settings_autostart_power_button(lv_event_t *e) {
         bool new_value = !get_var_manual_power_bool();
         set_var_manual_power_bool(new_value);
         set_button_text(objects.autostart_power_button, new_value ? "ВЫКЛ" : "ВКЛ");
+    }
+}
+
+static void apply_smoke_settings_button_state(bool enabled) {
+    if (!objects.smoke_settings_button) {
+        return;
+    }
+
+    lv_color_t bg_color = enabled ? lv_color_hex(0xffffff) : lv_color_hex(0xffd6d6);
+    lv_color_t border_color = enabled ? lv_color_hex(0xd0d0d0) : lv_color_hex(0xe6aaaa);
+
+    lv_obj_set_style_bg_color(objects.smoke_settings_button, bg_color, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(objects.smoke_settings_button, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(objects.smoke_settings_button, border_color, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(objects.smoke_settings_button, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(objects.smoke_settings_button, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_bg_color(objects.smoke_settings_button, bg_color, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(objects.smoke_settings_button, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(objects.smoke_settings_button, border_color, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(objects.smoke_settings_button, 2, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(objects.smoke_settings_button, 0, LV_PART_MAIN | LV_STATE_PRESSED);
+
+    lv_obj_t *label = lv_obj_get_child(objects.smoke_settings_button, 0);
+    if (label) {
+        lv_obj_set_style_text_color(label, lv_color_hex(0x1f1f1f), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label, lv_color_hex(0x1f1f1f), LV_PART_MAIN | LV_STATE_PRESSED);
+    }
+}
+
+static void event_handler_cb_settings_smoke_button(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        bool new_value = !get_var_smoke_temp_only_stop_bool();
+        set_var_smoke_temp_only_stop_bool(new_value);
+        apply_smoke_settings_button_state(new_value);
     }
 }
 
@@ -476,6 +512,7 @@ void tick_screen_main() {
     static int32_t last_filter_pct = INT32_MIN;
     static int32_t last_vent_on = -1;
     static int32_t last_tmp_fan_percent = INT32_MIN;
+    static int32_t last_tmp_fan_feedback = -1;
     static int32_t last_tmp_mode_bits = INT32_MIN;
     static int32_t last_tmp_manual = -1;
     static int32_t last_tmp_auto_temp = -1;
@@ -580,6 +617,7 @@ void tick_screen_main() {
     {
         // TEMPORARY DEBUG SECTION
         int32_t fan_percent = get_var_tmp_fan_percent();
+        int32_t fan_feedback = get_var_tmp_fan_feedback();
         int32_t mode_bits = get_var_tmp_mode_bits();
         int32_t manual = get_var_manual_power_bool() ? 1 : 0;
         int32_t auto_temp = get_var_autostart_temp_bool() ? 1 : 0;
@@ -596,6 +634,7 @@ void tick_screen_main() {
 
         if (s_tmp_debug_enabled && s_tmp_debug_label &&
             (fan_percent != last_tmp_fan_percent ||
+             fan_feedback != last_tmp_fan_feedback ||
              mode_bits != last_tmp_mode_bits ||
              manual != last_tmp_manual ||
              auto_temp != last_tmp_auto_temp ||
@@ -612,9 +651,10 @@ void tick_screen_main() {
              last_vent_on == -1)) {
             lv_label_set_text_fmt(
                 s_tmp_debug_label,
-                     "[TEMP DEBUG] fan=%ld%% vent=%ld\nmode=0x%04lX M:%ld AT:%ld AH:%ld\nALR T:%ld H:%ld S:%ld F:%ld FL:%ld\nMB addr=%ld idx=%ld req=%ld act=%ld",
+                     "[TEMP DEBUG] fan=%ld%% cmd=%ld fb=%ld\nmode=0x%04lX M:%ld AT:%ld AH:%ld\nALR T:%ld H:%ld S:%ld F:%ld FL:%ld\nMB addr=%ld idx=%ld req=%ld act=%ld",
                 (long)fan_percent,
                 (long)(get_var_vent_active() > 0 ? 1 : 0),
+                 (long)fan_feedback,
                 (unsigned long)((uint16_t)mode_bits),
                 (long)manual,
                 (long)auto_temp,
@@ -630,6 +670,7 @@ void tick_screen_main() {
                      (long)mb_baud_act);
 
             last_tmp_fan_percent = fan_percent;
+            last_tmp_fan_feedback = fan_feedback;
             last_tmp_mode_bits = mode_bits;
             last_tmp_manual = manual;
             last_tmp_auto_temp = auto_temp;
@@ -724,24 +765,30 @@ void create_screen_settings() {
             lv_label_set_text(obj, "ДВЕРЬ");
         }
         {
-            lv_obj_t *obj = lv_obj_create(parent_obj);
+            // smoke_settings_button
+            lv_obj_t *obj = lv_btn_create(parent_obj);
+            objects.smoke_settings_button = obj;
             lv_obj_set_pos(obj, 358, 586);
             lv_obj_set_size(obj, 257, 86);
-        }
-        {
-            lv_obj_t *obj = lv_label_create(parent_obj);
-            lv_obj_set_pos(obj, 417, 608);
-            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_label_set_text(obj, "ДЫМ");
-        }
-        {
-            // smoke_led_settings
-            lv_obj_t *obj = lv_led_create(parent_obj);
-            objects.smoke_led_settings = obj;
-            lv_obj_set_pos(obj, 554, 617);
-            lv_obj_set_size(obj, 24, 24);
-            lv_led_set_color(obj, lv_color_hex(0xffff0044));
+            lv_obj_add_event_cb(obj, event_handler_cb_settings_smoke_button, LV_EVENT_CLICKED, 0);
+            {
+                lv_obj_t *parent_obj = obj;
+                {
+                    lv_obj_t *obj = lv_label_create(parent_obj);
+                    lv_obj_set_pos(obj, 59, 22);
+                    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                    lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
+                    lv_label_set_text(obj, "ДЫМ");
+                }
+                {
+                    // smoke_led_settings
+                    lv_obj_t *obj = lv_led_create(parent_obj);
+                    objects.smoke_led_settings = obj;
+                    lv_obj_set_pos(obj, 196, 31);
+                    lv_obj_set_size(obj, 24, 24);
+                    lv_led_set_color(obj, lv_color_hex(0xffff0044));
+                }
+            }
         }
         {
             lv_obj_t *obj = lv_img_create(parent_obj);
@@ -992,6 +1039,7 @@ void tick_screen_settings() {
     static int32_t last_autostart_temp = -1;
     static int32_t last_autostart_humidity = -1;
     static int32_t last_manual_power = -1;
+    static int32_t last_smoke_temp_only_stop = -1;
 
     {
         int32_t new_val = get_var_temp();
@@ -1031,6 +1079,13 @@ void tick_screen_settings() {
             tick_value_change_obj = objects.smoke_led_settings;
             lv_led_set_brightness(objects.smoke_led_settings, new_val);
             tick_value_change_obj = NULL;
+        }
+    }
+    {
+        int32_t new_val = get_var_smoke_temp_only_stop_bool() ? 1 : 0;
+        if (new_val != last_smoke_temp_only_stop) {
+            apply_smoke_settings_button_state(new_val != 0);
+            last_smoke_temp_only_stop = new_val;
         }
     }
     {
@@ -1509,6 +1564,11 @@ void tick_screen(int screen_index) {
 }
 void tick_screen_by_id(enum ScreensEnum screenId) {
     tick_screen_funcs[screenId - 1]();
+}
+void tick_all_screens() {
+    for (int screenId = SCREEN_ID_MAIN; screenId <= SCREEN_ID_SERVICE; ++screenId) {
+        tick_screen_by_id((enum ScreensEnum)screenId);
+    }
 }
 
 void create_screens() {

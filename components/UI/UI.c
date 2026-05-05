@@ -103,7 +103,14 @@ void action_save_settings(lv_event_t *e)
 	(void)e;
 	system_config_t cfg = cfg_snapshot();
 	System_Config_set_from_display_persist(&cfg);
+	action_save_smoke_temp_only_stop_setting();
 	ui_load_screen_once(objects.main);
+}
+
+void action_save_smoke_temp_only_stop_setting(void)
+{
+	System_Config_set_smoke_temp_only_stop_enabled_persist(
+		System_Config_get_smoke_temp_only_stop_enabled());
 }
 
 void action_save_modbus_and_reboot(lv_event_t *e)
@@ -360,6 +367,16 @@ void set_var_manual_power_bool(bool value)
 	System_Config_set_from_display_volatile(&cfg);
 }
 
+bool get_var_smoke_temp_only_stop_bool(void)
+{
+	return System_Config_get_smoke_temp_only_stop_enabled();
+}
+
+void set_var_smoke_temp_only_stop_bool(bool value)
+{
+	System_Config_set_smoke_temp_only_stop_enabled_volatile(value);
+}
+
 #if ENABLE_SERVICE_ALARM_TOGGLES
 bool get_var_alarm_temp_enabled(void)
 {
@@ -415,6 +432,11 @@ void set_var_alarm_filter_enabled(bool value)
 int32_t get_var_tmp_fan_percent(void)
 {
 	return (int32_t)Peripherials_get_fan_percent();
+}
+
+int32_t get_var_tmp_fan_feedback(void)
+{
+	return Peripherials_get_fan_output_present_state() ? 1 : 0;
 }
 
 int32_t get_var_tmp_mode_bits(void)
