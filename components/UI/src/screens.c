@@ -282,6 +282,7 @@ void create_screen_main() {
     lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_SCROLLBAR | LV_STATE_DEFAULT);
     {
         lv_obj_t *parent_obj = obj;
+        lv_obj_t *smoke_box = NULL;
         {
             lv_obj_t *obj = lv_img_create(parent_obj);
             lv_obj_set_pos(obj, 431, 27);
@@ -394,6 +395,7 @@ void create_screen_main() {
         }
         {
             lv_obj_t *obj = lv_obj_create(parent_obj);
+            smoke_box = obj;
             lv_obj_set_pos(obj, 358, 586);
             lv_obj_set_size(obj, 257, 86);
         }
@@ -482,6 +484,16 @@ void create_screen_main() {
                     lv_obj_set_style_text_font(obj, &ui_font_roboto362, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_label_set_text(obj, "НАСТРОЙКИ");
                 }
+            }
+        }
+        {
+            if (smoke_box && objects.service_page_button && objects.settings_page_button) {
+                lv_obj_update_layout(parent_obj);
+                int32_t smoke_right = lv_obj_get_x(smoke_box) + lv_obj_get_width(smoke_box);
+                int32_t settings_x = lv_obj_get_x(objects.settings_page_button);
+                int32_t service_w = lv_obj_get_width(objects.service_page_button);
+                int32_t gap = (settings_x - smoke_right - service_w) / 2;
+                lv_obj_set_x(objects.service_page_button, smoke_right + gap);
             }
         }
         {
@@ -695,6 +707,8 @@ void create_screen_settings() {
     lv_obj_set_size(obj, 1280, 720);
     {
         lv_obj_t *parent_obj = obj;
+        lv_obj_t *door_label_settings = NULL;
+        lv_obj_t *smoke_label_settings = NULL;
         create_back_to_main_button(parent_obj);
         {
             lv_obj_t *obj = lv_img_create(parent_obj);
@@ -746,12 +760,13 @@ void create_screen_settings() {
         }
         {
             lv_obj_t *obj = lv_obj_create(parent_obj);
-            lv_obj_set_pos(obj, 51, 574);
+            lv_obj_set_pos(obj, 51, 586);
             lv_obj_set_size(obj, 257, 86);
             {
                 lv_obj_t *parent_obj = obj;
                 {
                     lv_obj_t *obj = lv_label_create(parent_obj);
+                    door_label_settings = obj;
                     lv_obj_set_pos(obj, 0, 0);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -772,13 +787,14 @@ void create_screen_settings() {
             // smoke_settings_button
             lv_obj_t *obj = lv_btn_create(parent_obj);
             objects.smoke_settings_button = obj;
-            lv_obj_set_pos(obj, 358, 574);
+            lv_obj_set_pos(obj, 358, 586);
             lv_obj_set_size(obj, 257, 86);
             lv_obj_add_event_cb(obj, event_handler_cb_settings_smoke_button, LV_EVENT_CLICKED, 0);
             {
                 lv_obj_t *parent_obj = obj;
                 {
                     lv_obj_t *obj = lv_label_create(parent_obj);
+                    smoke_label_settings = obj;
                     lv_obj_set_pos(obj, 0, 0);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -793,6 +809,16 @@ void create_screen_settings() {
                     lv_obj_set_size(obj, 24, 24);
                     lv_led_set_color(obj, lv_color_hex(0xffff0044));
                 }
+            }
+        }
+        {
+            if (door_label_settings && objects.door_led_settings) {
+                lv_obj_update_layout(door_label_settings);
+                lv_obj_align_to(objects.door_led_settings, door_label_settings, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+            }
+            if (smoke_label_settings && objects.smoke_led_settings) {
+                lv_obj_update_layout(smoke_label_settings);
+                lv_obj_align_to(objects.smoke_led_settings, smoke_label_settings, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
             }
         }
         {
@@ -996,7 +1022,7 @@ void create_screen_settings() {
             // modbus_page_button
             lv_obj_t *obj = lv_btn_create(parent_obj);
             objects.modbus_page_button = obj;
-            lv_obj_set_pos(obj, 665, 574);
+            lv_obj_set_pos(obj, 665, 586);
             lv_obj_set_size(obj, 257, 86);
             lv_obj_add_event_cb(obj, event_handler_cb_settings_modbus_page_button, LV_EVENT_CLICKED, 0);
             {
@@ -1015,7 +1041,7 @@ void create_screen_settings() {
             // save_button_settings
             lv_obj_t *obj = lv_btn_create(parent_obj);
             objects.save_button_settings = obj;
-            lv_obj_set_pos(obj, 972, 574);
+            lv_obj_set_pos(obj, 972, 586);
             lv_obj_set_size(obj, 259, 86);
             lv_obj_add_event_cb(obj, event_handler_cb_settings_save_button, LV_EVENT_CLICKED, 0);
             {

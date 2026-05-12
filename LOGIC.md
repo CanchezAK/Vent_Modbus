@@ -70,7 +70,7 @@
 - BUZZER: GPIO4
 - I2C0 (дисплей/тач/RTC/EEPROM): SDA=GPIO7, SCL=GPIO8
 - I2C1 (датчики, SHT31): SDA=GPIO3, SCL=GPIO2
-- Modbus: DIR=GPIO20, TX=GPIO22, RX=GPIO21
+- Modbus: DIR=GPIO20, TX=GPIO21, RX=GPIO22
 
 ## RW (holding, read/write)
 0. **config_mode** — битовая маска: bit0=manual, bit1=auto_temp, bit2=auto_humidity.

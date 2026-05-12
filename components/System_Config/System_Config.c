@@ -54,7 +54,7 @@
  * 60x means 1 real minute equals 1 service hour.
  */
 #if CONFIG_COMPILER_OPTIMIZATION_DEBUG
-#define TEMP_DEBUG_SERVICE_TIME_SCALE (60ULL)
+#define TEMP_DEBUG_SERVICE_TIME_SCALE (1ULL)
 #else
 #define TEMP_DEBUG_SERVICE_TIME_SCALE (1ULL)
 #endif
