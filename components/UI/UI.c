@@ -63,6 +63,30 @@ void action_go_to_service(lv_event_t *e)
 	ui_load_screen_once(objects.service);
 }
 
+void action_go_to_service_settings(lv_event_t *e)
+{
+	(void)e;
+	ui_load_screen_once(objects.service_settings);
+}
+
+void action_go_to_service_filter_confirm(lv_event_t *e)
+{
+	(void)e;
+	ui_load_screen_once(objects.service_filter_confirm);
+}
+
+void action_go_to_service_pin(lv_event_t *e)
+{
+	(void)e;
+	ui_load_screen_once(objects.service_pin);
+}
+
+void action_go_to_settings_pin(lv_event_t *e)
+{
+	(void)e;
+	ui_load_screen_once(objects.settings_pin);
+}
+
 static system_config_t cfg_snapshot(void)
 {
 	system_config_source_t source;

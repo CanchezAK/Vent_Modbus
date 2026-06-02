@@ -12,6 +12,16 @@ typedef struct _objects_t {
     lv_obj_t *settings;
     lv_obj_t *modbus;
     lv_obj_t *service;
+    lv_obj_t *service_settings;
+    lv_obj_t *service_filter_confirm;
+    lv_obj_t *service_pin;
+    lv_obj_t *service_pin_textarea;
+    lv_obj_t *service_pin_keyboard;
+    lv_obj_t *service_pin_error_label;
+    lv_obj_t *settings_pin;
+    lv_obj_t *settings_pin_textarea;
+    lv_obj_t *settings_pin_keyboard;
+    lv_obj_t *settings_pin_error_label;
     lv_obj_t *filter_clogging_bar;
     lv_obj_t *temp_label;
     lv_obj_t *humidity_label;
@@ -37,6 +47,7 @@ typedef struct _objects_t {
     lv_obj_t *autostart_humidity_button;
     lv_obj_t *modbus_page_button;
     lv_obj_t *save_button_settings;
+    lv_obj_t *settings_service_button;
     lv_obj_t *obj0;
     lv_obj_t *modbus_speed_roller;
     lv_obj_t *modbus_address_roller;
@@ -60,6 +71,10 @@ enum ScreensEnum {
     SCREEN_ID_SETTINGS = 2,
     SCREEN_ID_MODBUS = 3,
     SCREEN_ID_SERVICE = 4,
+    SCREEN_ID_SERVICE_SETTINGS = 5,
+    SCREEN_ID_SERVICE_PIN = 6,
+    SCREEN_ID_SERVICE_FILTER_CONFIRM = 7,
+    SCREEN_ID_SETTINGS_PIN = 8,
 };
 
 void create_screen_main();
@@ -73,6 +88,18 @@ void tick_screen_modbus();
 
 void create_screen_service();
 void tick_screen_service();
+
+void create_screen_service_settings();
+void tick_screen_service_settings();
+
+void create_screen_service_pin();
+void tick_screen_service_pin();
+
+void create_screen_service_filter_confirm();
+void tick_screen_service_filter_confirm();
+
+void create_screen_settings_pin();
+void tick_screen_settings_pin();
 
 void tick_screen_by_id(enum ScreensEnum screenId);
 void tick_screen(int screen_index);

@@ -11,6 +11,10 @@ void action_go_to_main(lv_event_t *e);
 void action_go_to_settings(lv_event_t *e);
 void action_go_to_modbus(lv_event_t *e);
 void action_go_to_service(lv_event_t *e);
+void action_go_to_service_settings(lv_event_t *e);
+void action_go_to_service_filter_confirm(lv_event_t *e);
+void action_go_to_service_pin(lv_event_t *e);
+void action_go_to_settings_pin(lv_event_t *e);
 
 void action_save_settings(lv_event_t *e);
 void action_save_modbus_and_reboot(lv_event_t *e);

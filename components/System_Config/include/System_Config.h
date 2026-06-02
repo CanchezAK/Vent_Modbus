@@ -7,6 +7,9 @@
 #define ENABLE_SERVICE_ALARM_TOGGLES 1
 #endif
 
+#define SYSTEM_CONFIG_SERVICE_PIN "0000"
+#define SYSTEM_CONFIG_SETTINGS_PIN "6812"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
