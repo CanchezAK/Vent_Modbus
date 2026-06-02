@@ -221,6 +221,9 @@ static void sanitize(system_config_t *cfg)
 	cfg->fan_min_percent = cfg->fan_manual_percent;
 	cfg->filter_limit_hours = (cfg->filter_limit_hours > 10000) ? 10000 : cfg->filter_limit_hours;
 	cfg->mode = cfg->mode & MODE_MASK_BITS;
+	if ((cfg->mode & (MODE_AUTOSTART_TEMP_BIT | MODE_AUTOSTART_HUMIDITY_BIT)) != 0U) {
+		cfg->mode &= (uint16_t)~MODE_MANUAL_BIT;
+	}
 	/* UI has no system-enable control; keep runtime logic enabled to avoid hidden-off conflicts. */
 	cfg->system_enable = 1;
 	cfg->smoke_enable = cfg->smoke_enable ? 1 : 0;

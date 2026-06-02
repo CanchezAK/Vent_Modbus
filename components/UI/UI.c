@@ -326,6 +326,7 @@ void set_var_autostart_temp_bool(bool value)
 {
 	system_config_t cfg = cfg_snapshot();
 	if (value) {
+		cfg.mode &= (uint16_t)~MODE_MANUAL_BIT;
 		cfg.mode |= MODE_AUTOSTART_TEMP_BIT;
 	} else {
 		cfg.mode &= (uint16_t)~MODE_AUTOSTART_TEMP_BIT;
@@ -343,6 +344,7 @@ void set_var_autostart_humidity_bool(bool value)
 {
 	system_config_t cfg = cfg_snapshot();
 	if (value) {
+		cfg.mode &= (uint16_t)~MODE_MANUAL_BIT;
 		cfg.mode |= MODE_AUTOSTART_HUMIDITY_BIT;
 	} else {
 		cfg.mode &= (uint16_t)~MODE_AUTOSTART_HUMIDITY_BIT;
@@ -360,6 +362,7 @@ void set_var_manual_power_bool(bool value)
 {
 	system_config_t cfg = cfg_snapshot();
 	if (value) {
+		cfg.mode &= (uint16_t)~(MODE_AUTOSTART_TEMP_BIT | MODE_AUTOSTART_HUMIDITY_BIT);
 		cfg.mode |= MODE_MANUAL_BIT;
 	} else {
 		cfg.mode &= (uint16_t)~MODE_MANUAL_BIT;
