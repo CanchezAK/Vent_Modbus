@@ -128,6 +128,7 @@ void action_save_settings(lv_event_t *e)
 	system_config_t cfg = cfg_snapshot();
 	System_Config_set_from_display_persist(&cfg);
 	action_save_smoke_temp_only_stop_setting();
+	System_Config_save_ui_flags();
 	ui_load_screen_once(objects.main);
 }
 

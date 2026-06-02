@@ -53,6 +53,23 @@ bool System_Config_get_smoke_temp_only_stop_enabled(void);
 void System_Config_set_smoke_temp_only_stop_enabled_volatile(bool enabled);
 void System_Config_set_smoke_temp_only_stop_enabled_persist(bool enabled);
 
+#if ENABLE_SERVICE_ALARM_TOGGLES
+bool System_Config_get_alarm_temp_enabled(void);
+void System_Config_set_alarm_temp_enabled_volatile(bool enabled);
+bool System_Config_get_alarm_humidity_enabled(void);
+void System_Config_set_alarm_humidity_enabled_volatile(bool enabled);
+bool System_Config_get_alarm_smoke_enabled(void);
+void System_Config_set_alarm_smoke_enabled_volatile(bool enabled);
+bool System_Config_get_alarm_fan_enabled(void);
+void System_Config_set_alarm_fan_enabled_volatile(bool enabled);
+bool System_Config_get_alarm_filter_enabled(void);
+void System_Config_set_alarm_filter_enabled_volatile(bool enabled);
+#endif
+
+bool System_Config_get_telemetry_enabled(void);
+void System_Config_set_telemetry_enabled_volatile(bool enabled);
+void System_Config_save_ui_flags(void);
+
 uint16_t System_Config_get_service_hours(void);
 uint32_t System_Config_get_service_seconds(void);
 void System_Config_set_service_hours(uint16_t value);

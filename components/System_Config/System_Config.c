@@ -29,6 +29,8 @@
 #define DEFAULT_SMOKE_TEMP_ONLY_STOP_ENABLED (1)
 #define DEFAULT_SYSTEM_ENABLE        (1)
 #define DEFAULT_MODBUS_BAUD_INDEX    (3)
+#define DEFAULT_ALARM_ENABLE_MASK    (0x1F)
+#define DEFAULT_TELEMETRY_ENABLED    (1)
 #define MAX_SERVICE_HOURS            (10000U)
 #define SECONDS_PER_HOUR             (3600U)
 #define SERVICE_PERSIST_QUANTUM_SECONDS (300U)
@@ -74,6 +76,8 @@ static uint32_t s_triac_min_delay_us = DEFAULT_TRIAC_MIN_DELAY_US;
 static uint32_t s_triac_pulse_us = DEFAULT_TRIAC_PULSE_US;
 static uint16_t s_alarm_clr = 0;
 static bool s_smoke_temp_only_stop_enabled = DEFAULT_SMOKE_TEMP_ONLY_STOP_ENABLED;
+static uint8_t s_alarm_enable_mask = DEFAULT_ALARM_ENABLE_MASK;
+static bool s_telemetry_enabled = DEFAULT_TELEMETRY_ENABLED;
 static uint32_t s_service_base_seconds = 0;
 static uint64_t s_service_base_us = 0;
 static uint64_t s_service_last_rtc_raw_us = 0;
@@ -89,6 +93,14 @@ uint16_t System_Config_get_service_hours(void);
 #define NVS_KEY_CFG   "cfg"
 #define NVS_KEY_SERVICE "service_state"
 #define NVS_KEY_SMOKE_TEMP_ONLY_STOP "smk_tmp_stop"
+#define NVS_KEY_UI_FLAGS "ui_flags"
+#define UI_FLAGS_VERSION (1U)
+
+#define ALARM_ENABLE_TEMP_MASK    (1U << 0)
+#define ALARM_ENABLE_HUM_MASK     (1U << 1)
+#define ALARM_ENABLE_SMOKE_MASK   (1U << 2)
+#define ALARM_ENABLE_FAN_MASK     (1U << 3)
+#define ALARM_ENABLE_FILTER_MASK  (1U << 4)
 
 typedef struct {
 	uint16_t mode;
@@ -113,6 +125,13 @@ typedef struct {
 	uint32_t service_seconds;
 	uint64_t rtc_raw_us;
 } persisted_service_state_t;
+
+typedef struct {
+	uint32_t version;
+	uint8_t alarm_enable_mask;
+	uint8_t telemetry_enabled;
+	uint8_t reserved[2];
+} persisted_ui_flags_t;
 
 static uint16_t clamp_percent(uint16_t value)
 {
@@ -383,6 +402,48 @@ static void save_persisted_smoke_temp_only_stop(bool enabled)
 	nvs_close(handle);
 }
 
+static void load_persisted_ui_flags(void)
+{
+	nvs_handle_t handle;
+	persisted_ui_flags_t stored = {0};
+	size_t size = sizeof(stored);
+
+	if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+		s_alarm_enable_mask = DEFAULT_ALARM_ENABLE_MASK;
+		s_telemetry_enabled = DEFAULT_TELEMETRY_ENABLED;
+		return;
+	}
+
+	esp_err_t err = nvs_get_blob(handle, NVS_KEY_UI_FLAGS, &stored, &size);
+	nvs_close(handle);
+	if (err != ESP_OK || size != sizeof(stored) || stored.version != UI_FLAGS_VERSION) {
+		s_alarm_enable_mask = DEFAULT_ALARM_ENABLE_MASK;
+		s_telemetry_enabled = DEFAULT_TELEMETRY_ENABLED;
+		return;
+	}
+
+	s_alarm_enable_mask = stored.alarm_enable_mask;
+	s_telemetry_enabled = (stored.telemetry_enabled != 0U);
+}
+
+static void save_persisted_ui_flags(uint8_t alarm_enable_mask, bool telemetry_enabled)
+{
+	nvs_handle_t handle;
+
+	if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+		return;
+	}
+
+	persisted_ui_flags_t stored = {
+		.version = UI_FLAGS_VERSION,
+		.alarm_enable_mask = alarm_enable_mask,
+		.telemetry_enabled = telemetry_enabled ? 1U : 0U,
+	};
+	(void)nvs_set_blob(handle, NVS_KEY_UI_FLAGS, &stored, sizeof(stored));
+	(void)nvs_commit(handle);
+	nvs_close(handle);
+}
+
 static void notify_update_task(void)
 {
 	TaskHandle_t task = NULL;
@@ -470,6 +531,7 @@ void System_Config_init(void)
 	}
 	load_persisted(&defaults, &legacy_service_hours);
 	load_persisted_smoke_temp_only_stop();
+	load_persisted_ui_flags();
 	if (defaults.filter_limit_hours == 0) {
 		defaults.filter_limit_hours = DEFAULT_FILTER_LIMIT_HOURS;
 	}
@@ -599,6 +661,135 @@ void System_Config_set_smoke_temp_only_stop_enabled_volatile(bool enabled)
 void System_Config_set_smoke_temp_only_stop_enabled_persist(bool enabled)
 {
 	set_smoke_temp_only_stop_enabled(SYSTEM_CONFIG_SOURCE_DISPLAY, enabled, true);
+}
+
+#if ENABLE_SERVICE_ALARM_TOGGLES
+bool System_Config_get_alarm_temp_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = (s_alarm_enable_mask & ALARM_ENABLE_TEMP_MASK) != 0U;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_alarm_temp_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (enabled) {
+		s_alarm_enable_mask |= ALARM_ENABLE_TEMP_MASK;
+	} else {
+		s_alarm_enable_mask &= (uint8_t)~ALARM_ENABLE_TEMP_MASK;
+	}
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+bool System_Config_get_alarm_humidity_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = (s_alarm_enable_mask & ALARM_ENABLE_HUM_MASK) != 0U;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_alarm_humidity_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (enabled) {
+		s_alarm_enable_mask |= ALARM_ENABLE_HUM_MASK;
+	} else {
+		s_alarm_enable_mask &= (uint8_t)~ALARM_ENABLE_HUM_MASK;
+	}
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+bool System_Config_get_alarm_smoke_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = (s_alarm_enable_mask & ALARM_ENABLE_SMOKE_MASK) != 0U;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_alarm_smoke_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (enabled) {
+		s_alarm_enable_mask |= ALARM_ENABLE_SMOKE_MASK;
+	} else {
+		s_alarm_enable_mask &= (uint8_t)~ALARM_ENABLE_SMOKE_MASK;
+	}
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+bool System_Config_get_alarm_fan_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = (s_alarm_enable_mask & ALARM_ENABLE_FAN_MASK) != 0U;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_alarm_fan_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (enabled) {
+		s_alarm_enable_mask |= ALARM_ENABLE_FAN_MASK;
+	} else {
+		s_alarm_enable_mask &= (uint8_t)~ALARM_ENABLE_FAN_MASK;
+	}
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+bool System_Config_get_alarm_filter_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = (s_alarm_enable_mask & ALARM_ENABLE_FILTER_MASK) != 0U;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_alarm_filter_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	if (enabled) {
+		s_alarm_enable_mask |= ALARM_ENABLE_FILTER_MASK;
+	} else {
+		s_alarm_enable_mask &= (uint8_t)~ALARM_ENABLE_FILTER_MASK;
+	}
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+#endif
+
+bool System_Config_get_telemetry_enabled(void)
+{
+	bool enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	enabled = s_telemetry_enabled;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	return enabled;
+}
+
+void System_Config_set_telemetry_enabled_volatile(bool enabled)
+{
+	portENTER_CRITICAL(&s_cfg_lock);
+	s_telemetry_enabled = enabled ? true : false;
+	portEXIT_CRITICAL(&s_cfg_lock);
+}
+
+void System_Config_save_ui_flags(void)
+{
+	uint8_t alarm_mask;
+	bool telemetry_enabled;
+	portENTER_CRITICAL(&s_cfg_lock);
+	alarm_mask = s_alarm_enable_mask;
+	telemetry_enabled = s_telemetry_enabled;
+	portEXIT_CRITICAL(&s_cfg_lock);
+	save_persisted_ui_flags(alarm_mask, telemetry_enabled);
 }
 
 uint16_t System_Config_get_service_hours(void)

@@ -12,22 +12,16 @@
 #define TEMP_DISABLE_FAN_ALARM       (0U)
 
 #if ENABLE_SERVICE_ALARM_TOGGLES
-static bool s_alarm_enable_temp = true;
-static bool s_alarm_enable_humidity = true;
-static bool s_alarm_enable_smoke = true;
-static bool s_alarm_enable_fan = true;
-static bool s_alarm_enable_filter = true;
-
-bool Logic_get_alarm_temp_enabled(void) { return s_alarm_enable_temp; }
-void Logic_set_alarm_temp_enabled(bool enabled) { s_alarm_enable_temp = enabled; }
-bool Logic_get_alarm_humidity_enabled(void) { return s_alarm_enable_humidity; }
-void Logic_set_alarm_humidity_enabled(bool enabled) { s_alarm_enable_humidity = enabled; }
-bool Logic_get_alarm_smoke_enabled(void) { return s_alarm_enable_smoke; }
-void Logic_set_alarm_smoke_enabled(bool enabled) { s_alarm_enable_smoke = enabled; }
-bool Logic_get_alarm_fan_enabled(void) { return s_alarm_enable_fan; }
-void Logic_set_alarm_fan_enabled(bool enabled) { s_alarm_enable_fan = enabled; }
-bool Logic_get_alarm_filter_enabled(void) { return s_alarm_enable_filter; }
-void Logic_set_alarm_filter_enabled(bool enabled) { s_alarm_enable_filter = enabled; }
+bool Logic_get_alarm_temp_enabled(void) { return System_Config_get_alarm_temp_enabled(); }
+void Logic_set_alarm_temp_enabled(bool enabled) { System_Config_set_alarm_temp_enabled_volatile(enabled); }
+bool Logic_get_alarm_humidity_enabled(void) { return System_Config_get_alarm_humidity_enabled(); }
+void Logic_set_alarm_humidity_enabled(bool enabled) { System_Config_set_alarm_humidity_enabled_volatile(enabled); }
+bool Logic_get_alarm_smoke_enabled(void) { return System_Config_get_alarm_smoke_enabled(); }
+void Logic_set_alarm_smoke_enabled(bool enabled) { System_Config_set_alarm_smoke_enabled_volatile(enabled); }
+bool Logic_get_alarm_fan_enabled(void) { return System_Config_get_alarm_fan_enabled(); }
+void Logic_set_alarm_fan_enabled(bool enabled) { System_Config_set_alarm_fan_enabled_volatile(enabled); }
+bool Logic_get_alarm_filter_enabled(void) { return System_Config_get_alarm_filter_enabled(); }
+void Logic_set_alarm_filter_enabled(bool enabled) { System_Config_set_alarm_filter_enabled_volatile(enabled); }
 #endif
 
 static uint8_t compute_auto_channel_percent(uint16_t current_value,
@@ -161,11 +155,11 @@ void Logic_step(logic_state_t *state,
 	bool fan_alarm_enabled = true;
 	bool filter_alarm_enabled = true;
 #if ENABLE_SERVICE_ALARM_TOGGLES
-	temp_alarm_enabled = s_alarm_enable_temp;
-	hum_alarm_enabled = s_alarm_enable_humidity;
-	smoke_alarm_enabled = s_alarm_enable_smoke;
-	fan_alarm_enabled = s_alarm_enable_fan;
-	filter_alarm_enabled = s_alarm_enable_filter;
+	temp_alarm_enabled = System_Config_get_alarm_temp_enabled();
+	hum_alarm_enabled = System_Config_get_alarm_humidity_enabled();
+	smoke_alarm_enabled = System_Config_get_alarm_smoke_enabled();
+	fan_alarm_enabled = System_Config_get_alarm_fan_enabled();
+	filter_alarm_enabled = System_Config_get_alarm_filter_enabled();
 #endif
 
 	bool smoke_enabled = smoke_alarm_enabled;
@@ -310,7 +304,11 @@ void Logic_step(logic_state_t *state,
 		fan_percent = 100;
 	}
 	if (smoke_enabled && state->alarm_smoke_latched) {
-		fan_percent = (temp_only_mode && smoke_temp_only_stop_enabled) ? 0 : 100;
+		if (temp_only_mode) {
+			fan_percent = smoke_temp_only_stop_enabled ? 0 : 100;
+		} else {
+			fan_percent = 0;
+		}
 	}
 
 	if (fan_alarm_enabled) {

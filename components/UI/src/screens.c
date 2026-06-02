@@ -246,9 +246,11 @@ static void settings_pin_fail_timer_cb(lv_timer_t *timer) {
 
 static void event_handler_cb_service_telemetry_button(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        s_tmp_debug_enabled = !s_tmp_debug_enabled;
-        apply_debug_label_visibility();
-        set_button_text(objects.service_telemetry_button, s_tmp_debug_enabled ? "TEL:1" : "TEL:0");
+    bool new_value = !s_tmp_debug_enabled;
+    s_tmp_debug_enabled = new_value;
+    System_Config_set_telemetry_enabled_volatile(new_value);
+    apply_debug_label_visibility();
+    set_button_text(objects.service_telemetry_button, new_value ? "TEL:1" : "TEL:0");
     }
 }
 
@@ -2028,6 +2030,8 @@ void create_screens() {
     lv_disp_t *dispp = lv_disp_get_default();
     lv_theme_t *theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED), false, LV_FONT_DEFAULT);
     lv_disp_set_theme(dispp, theme);
+
+    s_tmp_debug_enabled = System_Config_get_telemetry_enabled();
     
     create_screen_main();
     create_screen_settings();
